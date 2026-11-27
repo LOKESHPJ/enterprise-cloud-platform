@@ -71,15 +71,19 @@ for a week ($10) or forgetting NAT and Multi-AZ are on.
    not fail or leave paid snapshots behind.
 7. Destroy workflows for both tracks.
 
-## Recommended extra guard (not provisioned here)
+## Budget guardrail (provisioned by Terraform)
 
-Create an AWS Budget with a $1 threshold and email alerts:
+`aws_budgets_budget.monthly` in `infrastructure/serverless/release.tf` creates an
+account-level monthly budget (`monthly_budget_usd`, default $1) with email thresholds at
+50, 80 and 100 percent of actual spend. Set the recipient once:
 
 ```bash
-aws budgets create-budget \
-  --account-id "$(aws sts get-caller-identity --query Account --output text)" \
-  --budget '{"BudgetName":"ecp-zero-spend","BudgetLimit":{"Amount":"1","Unit":"USD"},"TimeUnit":"MONTHLY","BudgetType":"COST"}' \
-  --notifications-with-subscribers '[{"Notification":{"NotificationType":"ACTUAL","ComparisonOperator":"GREATER_THAN","Threshold":80},"Subscribers":[{"SubscriptionType":"EMAIL","Address":"you@example.com"}]}]'
+gh variable set COST_ALERT_EMAIL --body "you@example.com" --repo LOKESHPJ/enterprise-cloud-platform
 ```
 
-Budgets themselves are free for the first two budgets.
+The workflow passes it as `-var="alert_email=..."`; an empty value simply skips the
+notifications while keeping the budget visible in Cost Management.
+
+Tag-based cost allocation is also in place: every resource carries `Project`,
+`Environment`, `Track`, `CostCenter` and `Owner`, so a tag-filtered budget can be added
+later without touching resource definitions.

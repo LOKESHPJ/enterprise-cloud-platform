@@ -47,6 +47,26 @@ output "lambda_function_name" {
   value       = aws_lambda_function.api.function_name
 }
 
+output "lambda_alias" {
+  description = "Alias that API Gateway invokes and CodeDeploy shifts traffic on."
+  value       = aws_lambda_alias.live.name
+}
+
+output "codedeploy_app" {
+  description = "CodeDeploy application for canary releases."
+  value       = aws_codedeploy_app.api.name
+}
+
+output "codedeploy_deployment_group" {
+  description = "Deployment group the pipeline targets."
+  value       = aws_codedeploy_deployment_group.api.deployment_group_name
+}
+
+output "budget_name" {
+  description = "Account level monthly budget."
+  value       = aws_budgets_budget.monthly.name
+}
+
 output "log_groups" {
   description = "CloudWatch log groups created and managed by Terraform."
   value = {

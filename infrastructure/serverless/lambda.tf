@@ -68,6 +68,9 @@ resource "aws_lambda_function" "api" {
   timeout          = var.lambda_timeout_seconds
   architectures    = ["x86_64"]
 
+  # Immutable versions are what CodeDeploy shifts traffic between.
+  publish = true
+
   environment {
     variables = {
       STORAGE_BACKEND = "dynamodb"
@@ -90,5 +93,18 @@ resource "aws_lambda_function" "api" {
 
   tags = {
     Name = "${local.name_prefix}-api"
+  }
+}
+
+# API Gateway invokes the alias, never $LATEST. CodeDeploy owns the alias's
+# function_version, so Terraform must not fight it for control.
+resource "aws_lambda_alias" "live" {
+  name             = "live"
+  description      = "Serving alias for ${local.name_prefix}; shifted by CodeDeploy canary"
+  function_name    = aws_lambda_function.api.function_name
+  function_version = aws_lambda_function.api.version
+
+  lifecycle {
+    ignore_changes = [function_version]
   }
 }

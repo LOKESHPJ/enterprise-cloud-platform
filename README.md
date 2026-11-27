@@ -1,7 +1,11 @@
-# Enterprise Cloud Platform
+# CloudForge
 
-A production-shaped AWS platform delivered entirely through GitHub and AWS: no local
-runtime, no local database, no Docker Desktop. Code is built on GitHub runners,
+**Enterprise Cloud Platform Engineering** — a cloud-native platform that automates the
+application delivery lifecycle: infrastructure provisioning, secure CI/CD, canary releases
+with automatic rollback, monitoring, and cost governance. A small e-commerce service is the
+reference workload; the platform underneath is what is meant to be reused.
+
+No local runtime, no local database, no Docker Desktop. Code is built on GitHub runners,
 infrastructure is applied by Terraform from GitHub Actions using short-lived OIDC
 credentials, and the application is reachable on a public HTTPS URL.
 

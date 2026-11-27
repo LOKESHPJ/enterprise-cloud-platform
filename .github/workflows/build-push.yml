@@ -18,9 +18,9 @@ permissions:
 
 env:
   AWS_REGION: us-east-1
-  AWS_TERRAFORM_ROLE_ARN: ${{ vars.AWS_TERRAFORM_ROLE_ARN || 'arn:aws:iam::000000000000:role/ecp-gha-terraform' }}
-  TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET || 'ecp-tfstate-000000000000' }}
-  TF_LOCK_TABLE: ecp-terraform-locks
+  AWS_TERRAFORM_ROLE_ARN: ${{ vars.AWS_TERRAFORM_ROLE_ARN || 'arn:aws:iam::000000000000:role/cloudforge-gha-terraform' }}
+  TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET || 'cloudforge-tfstate-000000000000' }}
+  TF_LOCK_TABLE: cloudforge-terraform-locks
 
 jobs:
   build:
@@ -49,7 +49,7 @@ jobs:
           set -euo pipefail
           ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
           REGISTRY="${ACCOUNT}.dkr.ecr.${AWS_REGION}.amazonaws.com"
-          REPO="${REGISTRY}/ecp-dev-${{ matrix.component }}"
+          REPO="${REGISTRY}/cloudforge-dev-${{ matrix.component }}"
           echo "registry=${REGISTRY}" >> "$GITHUB_OUTPUT"
           echo "repo=${REPO}" >> "$GITHUB_OUTPUT"
 
@@ -60,19 +60,36 @@ jobs:
           aws ecr get-login-password --region "${AWS_REGION}" \
             | docker login --username AWS --password-stdin "${{ steps.ecr.outputs.registry }}"
 
-      - uses: docker/build-push-action@v6
+      - name: Build image (load locally, do not push yet)
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: ${{ matrix.dockerfile }}
-          push: true
-          tags: |
-            ${{ steps.ecr.outputs.repo }}:sha-${{ github.sha }}
-            ${{ steps.ecr.outputs.repo }}:latest
+          push: false
+          load: true
+          tags: ${{ steps.ecr.outputs.repo }}:sha-${{ github.sha }}
           cache-from: type=gha,scope=${{ matrix.component }}
           cache-to: type=gha,mode=max,scope=${{ matrix.component }}
           labels: |
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+
+      # Nothing reaches the registry unless it passes the CVE gate first.
+      - name: Scan image for vulnerabilities
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ steps.ecr.outputs.repo }}:sha-${{ github.sha }}
+          severity: "CRITICAL,HIGH"
+          ignore-unfixed: "true"
+          exit-code: "1"
+          format: "table"
+
+      - name: Push vetted image
+        run: |
+          set -euo pipefail
+          docker tag "${{ steps.ecr.outputs.repo }}:sha-${{ github.sha }}" "${{ steps.ecr.outputs.repo }}:latest"
+          docker push "${{ steps.ecr.outputs.repo }}:sha-${{ github.sha }}"
+          docker push "${{ steps.ecr.outputs.repo }}:latest"
 
       - name: Summary
         run: |

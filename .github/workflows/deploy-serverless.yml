@@ -23,9 +23,9 @@ concurrency:
 env:
   AWS_REGION: us-east-1
   TF_VERSION: 1.17.2
-  TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET || 'ecp-tfstate-000000000000' }}
-  TF_LOCK_TABLE: ecp-terraform-locks
-  AWS_SERVERLESS_ROLE_ARN: ${{ vars.AWS_SERVERLESS_ROLE_ARN || 'arn:aws:iam::000000000000:role/ecp-gha-serverless' }}
+  TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET || 'cloudforge-tfstate-000000000000' }}
+  TF_LOCK_TABLE: cloudforge-terraform-locks
+  AWS_SERVERLESS_ROLE_ARN: ${{ vars.AWS_SERVERLESS_ROLE_ARN || 'arn:aws:iam::000000000000:role/cloudforge-gha-serverless' }}
   ENABLE_CLOUDFRONT: ${{ vars.ENABLE_CLOUDFRONT || 'false' }}
   TF_IN_AUTOMATION: "true"
   TF_INPUT: "0"
@@ -65,6 +65,9 @@ jobs:
       site_url: ${{ steps.tf.outputs.site_url }}
       bucket: ${{ steps.tf.outputs.bucket }}
       distribution_id: ${{ steps.tf.outputs.distribution_id }}
+      lambda_function: ${{ steps.tf.outputs.lambda_function }}
+      codedeploy_app: ${{ steps.tf.outputs.codedeploy_app }}
+      codedeploy_dg: ${{ steps.tf.outputs.codedeploy_dg }}
     defaults:
       run:
         working-directory: infrastructure/serverless
@@ -125,7 +128,11 @@ jobs:
         run: terraform validate
 
       - name: Terraform plan
-        run: terraform plan -input=false -out=tfplan -var="app_version=${GITHUB_SHA::8}" -var="enable_cloudfront=${ENABLE_CLOUDFRONT}"
+        run: |
+          terraform plan -input=false -out=tfplan \
+            -var="app_version=${GITHUB_SHA::8}" \
+            -var="enable_cloudfront=${ENABLE_CLOUDFRONT}" \
+            -var="alert_email=${{ vars.COST_ALERT_EMAIL || '' }}"
 
       - name: Terraform apply
         run: terraform apply -input=false -auto-approve tfplan
@@ -138,11 +145,57 @@ jobs:
             echo "site_url=$(terraform output -raw site_url)"
             echo "bucket=$(terraform output -raw frontend_bucket)"
             echo "distribution_id=$(terraform output -raw cloudfront_distribution_id)"
+            echo "lambda_function=$(terraform output -raw lambda_function_name)"
+            echo "codedeploy_app=$(terraform output -raw codedeploy_app)"
+            echo "codedeploy_dg=$(terraform output -raw codedeploy_deployment_group)"
           } >> "$GITHUB_OUTPUT"
+
+  release:
+    name: Canary release (CodeDeploy)
+    needs: provision
+    runs-on: ubuntu-latest
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_SERVERLESS_ROLE_ARN }}
+          role-session-name: gha-release-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Shift traffic with CodeDeploy
+        env:
+          FUNCTION: ${{ needs.provision.outputs.lambda_function }}
+          APP: ${{ needs.provision.outputs.codedeploy_app }}
+          DG: ${{ needs.provision.outputs.codedeploy_dg }}
+        run: |
+          set -euo pipefail
+          CURRENT=$(aws lambda get-alias --function-name "$FUNCTION" --name live --query FunctionVersion --output text)
+          TARGET=$(aws lambda list-versions-by-function --function-name "$FUNCTION" \
+            --query 'Versions[].Version' --output text | tr '\t' '\n' | grep -E '^[0-9]+$' | sort -n | tail -1)
+          echo "alias live: current=${CURRENT} newest=${TARGET}"
+          if [ "${CURRENT}" = "${TARGET}" ]; then
+            echo "Alias already serves the newest version; no release required."
+            exit 0
+          fi
+          APPSPEC=$(jq -n --arg f "$FUNCTION" --arg cv "${CURRENT}" --arg tv "${TARGET}" \
+            '{version:0.0,Resources:[{api:{Type:"AWS::Lambda::Function",Properties:{Name:$f,Alias:"live",CurrentVersion:$cv,TargetVersion:$tv}}}]}')
+          REVISION=$(jq -n --arg c "${APPSPEC}" '{revisionType:"AppSpecContent",appSpecContent:{content:$c}}')
+          DEPLOY=$(aws deploy create-deployment --application-name "${APP}" \
+            --deployment-group-name "${DG}" --revision "${REVISION}" --query deploymentId --output text)
+          echo "DEPLOYMENT_ID=${DEPLOY}" >> "$GITHUB_ENV"
+          echo "Canary 10% -> 100% over 5 minutes: ${DEPLOY}"
+          aws deploy wait deployment-successful --deployment-id "${DEPLOY}"
+          echo "Canary complete. 100% of traffic on version ${TARGET}."
+
+      - name: Deployment outcome
+        if: always()
+        run: |
+          if [ -z "${DEPLOYMENT_ID:-}" ]; then exit 0; fi
+          aws deploy get-deployment --deployment-id "${DEPLOYMENT_ID}" \
+            --query 'deploymentInfo.{status:status,errorInformation:errorInformation}' || true
 
   ship:
     name: Ship frontend and verify
-    needs: provision
+    needs: [provision, release]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -239,6 +292,23 @@ jobs:
             sleep 10
           done
           grep -q "Enterprise Cloud Platform" site.html
+
+      - name: Roll back alias after failed verification
+        if: failure()
+        env:
+          FUNCTION: ${{ needs.provision.outputs.lambda_function }}
+        run: |
+          set -euo pipefail
+          VERSIONS=$(aws lambda list-versions-by-function --function-name "$FUNCTION" \
+            --query 'Versions[].Version' --output text | tr '\t' '\n' | grep -E '^[0-9]+$' | sort -n)
+          CURRENT=$(aws lambda get-alias --function-name "$FUNCTION" --name live --query FunctionVersion --output text)
+          PREVIOUS=$(echo "$VERSIONS" | awk -v c="${CURRENT}" '$1 < c' | tail -1)
+          if [ -z "${PREVIOUS}" ]; then
+            echo "No earlier version available; leaving the alias on ${CURRENT}."
+            exit 0
+          fi
+          echo "Verification failed. Rolling alias live from ${CURRENT} back to ${PREVIOUS}."
+          aws lambda update-alias --function-name "$FUNCTION" --name live --function-version "${PREVIOUS}"
 
       - name: Deployment summary
         env:

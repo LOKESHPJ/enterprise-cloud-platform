@@ -7,6 +7,8 @@ locals {
     Track       = "enterprise-ecs"
     ManagedBy   = "terraform"
     Repository  = var.repository
+    CostCenter  = "platform-engineering"
+    Owner       = "platform-team"
   }
 
   # Cost mode (default): no NAT gateway, so tasks run in public subnets with a

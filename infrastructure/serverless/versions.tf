@@ -26,6 +26,8 @@ locals {
     Track       = "serverless-free-tier"
     ManagedBy   = "terraform"
     Repository  = var.repository
+    CostCenter  = "platform-engineering"
+    Owner       = "platform-team"
   }
 
   name_prefix = "${var.project}-${var.environment}"

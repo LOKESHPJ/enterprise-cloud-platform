@@ -5,8 +5,8 @@ Actions and pushed to Amazon ECR:
 
 | Image | Dockerfile | Registry path |
 |---|---|---|
-| Backend (FastAPI + uvicorn) | `application/backend/Dockerfile` | `<account>.dkr.ecr.<region>.amazonaws.com/ecp-<env>-api:<sha>` |
-| Frontend (React → nginx) | `application/frontend/Dockerfile` | `<account>.dkr.ecr.<region>.amazonaws.com/ecp-<env>-web:<sha>` |
+| Backend (FastAPI + uvicorn) | `application/backend/Dockerfile` | `<account>.dkr.ecr.<region>.amazonaws.com/cloudforge-<env>-api:<sha>` |
+| Frontend (React → nginx) | `application/frontend/Dockerfile` | `<account>.dkr.ecr.<region>.amazonaws.com/cloudforge-<env>-web:<sha>` |
 
 Every image is tagged with the full commit SHA (immutable) plus `latest`.
 ECS task definitions reference the SHA tag, which is what makes rollback a

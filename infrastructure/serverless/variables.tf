@@ -7,7 +7,7 @@ variable "aws_region" {
 variable "project" {
   description = "Short project slug used in resource names."
   type        = string
-  default     = "ecp"
+  default     = "cloudforge"
 }
 
 variable "environment" {
@@ -61,4 +61,16 @@ variable "allowed_origins" {
   description = "CORS origins for the API. Tighten to the CloudFront domain after the first apply."
   type        = list(string)
   default     = ["*"]
+}
+
+variable "monthly_budget_usd" {
+  description = "Account level monthly budget threshold in USD. Alerts at 50/80/100 percent."
+  type        = number
+  default     = 1
+}
+
+variable "alert_email" {
+  description = "Email address subscribed to budget alerts. Empty disables notifications."
+  type        = string
+  default     = ""
 }
