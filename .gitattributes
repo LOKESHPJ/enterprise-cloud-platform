@@ -1,0 +1,8 @@
+# Normalise line endings so container builds and shell steps behave identically
+# on every platform (Windows checkouts included).
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.zip binary
+*.ico binary
