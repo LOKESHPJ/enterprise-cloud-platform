@@ -1,0 +1,30 @@
+# Copy to terraform.tfvars for a deliberate deployment.
+# NEVER commit a tfvars file that sets confirm_spend = true without review.
+
+aws_region  = "us-east-1"
+environment = "dev"
+repository  = "LOKESHPJ/enterprise-cloud-platform"
+
+# Cost gate - must be true before anything billable is created.
+confirm_spend = false
+
+# Cost mode: tasks in public subnets, no NAT gateway (~$32/month saved).
+enable_nat_gateway = false
+
+# Two-phase deploy: first apply false (ECR only), push images, then true.
+enable_services = false
+image_tag       = "sha-bootstrap"
+
+api_desired_count = 2
+web_desired_count = 1
+api_cpu           = 256
+api_memory        = 512
+
+db_instance_class      = "db.t4g.micro"
+db_multi_az            = false
+db_allocated_storage_gb = 20
+db_deletion_protection = false
+
+log_retention_days = 7
+alert_email        = ""
+certificate_arn    = ""

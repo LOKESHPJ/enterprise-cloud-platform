@@ -4,10 +4,8 @@ name: Terraform plan (serverless)
 # No apply, no credentials beyond a read-mostly OIDC role.
 
 on:
-  pull_request:
-    paths:
-      - "infrastructure/serverless/**"
-      - "application/**"
+  # Pull request plans are intentionally manual: the deploy role is scoped to
+  # `main` and protected environments, so untrusted PR code cannot assume it.
   workflow_dispatch:
 
 permissions:

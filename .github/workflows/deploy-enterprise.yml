@@ -1,0 +1,160 @@
+name: Deploy enterprise stack (billable)
+
+# The full architecture from the specification: VPC, ALB, ECS Fargate, RDS
+# PostgreSQL, ECR, Secrets Manager, CloudWatch.
+#
+# THIS COSTS MONEY (~$40-47/month at the default sizing). It is manual-only and
+# requires typing an explicit confirmation phrase, plus the protected environment
+# `production-enterprise` if branch protection is configured.
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type DEPLOY-BILLABLE to acknowledge hourly charges'
+        required: true
+        type: string
+      image_tag:
+        description: 'Image tag to deploy (empty = sha-<current commit>)'
+        required: false
+        type: string
+        default: ''
+      enable_services:
+        description: 'Set false for the first apply (infrastructure + ECR only)'
+        required: true
+        type: choice
+        options: ['false', 'true']
+        default: 'false'
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: enterprise-production
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-1
+  TF_VERSION: 1.17.2
+  AWS_TERRAFORM_ROLE_ARN: ${{ vars.AWS_TERRAFORM_ROLE_ARN || 'arn:aws:iam::000000000000:role/ecp-gha-terraform' }}
+  TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET || 'ecp-tfstate-000000000000' }}
+  TF_LOCK_TABLE: ecp-terraform-locks
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "0"
+  IMAGE_TAG: ${{ inputs.image_tag != '' && inputs.image_tag || format('sha-{0}', github.sha) }}
+
+jobs:
+  gate:
+    name: Cost acknowledgement
+    runs-on: ubuntu-latest
+    steps:
+      - name: Refuse without explicit confirmation
+        if: inputs.confirm != 'DEPLOY-BILLABLE'
+        run: |
+          echo "::error::Confirmation phrase missing. Re-run with confirm=DEPLOY-BILLABLE after reading docs/COSTS.md."
+          exit 1
+
+      - name: Cost estimate
+        run: |
+          {
+            echo "### Billable deployment acknowledged"
+            echo ""
+            echo "| Resource | Approx monthly |"
+            echo "|---|---|"
+            echo "| Application Load Balancer | \$16-20 |"
+            echo "| ECS Fargate (3 tasks, 0.25 vCPU) | \$14-16 |"
+            echo "| RDS PostgreSQL db.t4g.micro | \$12-15 |"
+            echo "| Secrets Manager, ECR, CloudWatch | ~\$1 |"
+            echo "| **Total** | **~\$43-52/month** |"
+            echo ""
+            echo "Run the *Destroy enterprise* workflow to stop the spend."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  provision:
+    name: Terraform apply
+    needs: gate
+    runs-on: ubuntu-latest
+    environment: production-enterprise
+    defaults:
+      run:
+        working-directory: infrastructure/terraform
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_TERRAFORM_ROLE_ARN }}
+          role-session-name: gha-enterprise-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: Init
+        run: terraform init -input=false -backend-config="bucket=${TF_STATE_BUCKET}" -backend-config="dynamodb_table=${TF_LOCK_TABLE}"
+
+      - name: Validate
+        run: terraform validate
+
+      - name: Plan
+        run: |
+          terraform plan -input=false -no-color -out=tfplan \
+            -var="confirm_spend=true" \
+            -var="enable_services=${{ inputs.enable_services }}" \
+            -var="image_tag=${IMAGE_TAG}" | tee plan.txt
+
+      - name: Apply
+        run: terraform apply -input=false -auto-approve tfplan
+
+      - name: Outputs
+        run: |
+          {
+            echo "### Enterprise stack outputs"
+            echo '```'
+            terraform output -no-color
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  verify:
+    name: Verify ALB health
+    needs: provision
+    if: inputs.enable_services == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infrastructure/terraform
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_TERRAFORM_ROLE_ARN }}
+          role-session-name: gha-verify-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - run: terraform init -input=false -backend-config="bucket=${TF_STATE_BUCKET}" -backend-config="dynamodb_table=${TF_LOCK_TABLE}"
+
+      - name: Wait for targets to become healthy
+        run: |
+          set -euo pipefail
+          URL=$(terraform output -raw application_url)
+          echo "Polling ${URL}/api/health"
+          for attempt in $(seq 1 40); do
+            code=$(curl -s -o health.json -w '%{http_code}' "${URL}/api/health" || true)
+            echo "attempt ${attempt}: HTTP ${code}"
+            if [ "${code}" = "200" ]; then
+              cat health.json
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "::error::API did not become healthy in time"
+          exit 1
