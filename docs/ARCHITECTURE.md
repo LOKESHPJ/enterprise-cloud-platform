@@ -13,24 +13,29 @@
 
 | Layer | Service | Notes |
 |---|---|---|
-| Edge | CloudFront (PriceClass_100) | HTTPS on `*.cloudfront.net`, security headers policy |
-| Static hosting | S3 (private, OAC) | React bundle, immutable asset caching, SPA fallback |
-| API | API Gateway HTTP API | `GET /` and `ANY /api/{proxy+}`, CORS, 100 rps throttle |
-| Compute | Lambda (python3.12, 512 MB) | FastAPI through Mangum, 25 s timeout |
+| Edge / SPA hosting | API Gateway (`$default` route) → Lambda | One HTTPS origin for UI and API; no CORS |
+| Optional CDN | CloudFront + private S3 (OAC) | `enable_cloudfront=true`; blocked on unverified accounts |
+| API | API Gateway HTTP API | `GET /`, `ANY /api/{proxy+}`, `$default`, 100 rps throttle |
+| Compute | Lambda (python3.12, 512 MB) | FastAPI through Mangum, 25 s timeout, serves the SPA bundle from `static/` |
 | Data | DynamoDB single table | `pk`/`sk` + `gsi1`, PAY_PER_REQUEST, encryption at rest |
 | Logs | CloudWatch Logs | 7 day retention on both log groups |
 | Alerts | 2 metric alarms + dashboard | Lambda errors, API 5xx |
 
-Request path:
+Request path (default mode):
 
 ```
-Browser → CloudFront → S3 (index.html, assets)
-Browser → API Gateway → Lambda → DynamoDB
+Browser → API Gateway → Lambda ──┬── /api/* → FastAPI routers → DynamoDB
+                                 └── /*     → static/index.html + /assets
 ```
 
-The SPA calls the API directly (cross-origin, CORS) rather than proxying through
-CloudFront. This avoids the classic CloudFront-to-API-Gateway Host header problem and
-keeps the origin policy trivial.
+Two hosting modes exist because CloudFront is unavailable until AWS verifies a new
+account:
+
+| `enable_cloudfront` | SPA served from | URL scheme |
+|---|---|---|
+| `false` (default here) | the Lambda bundle, same origin as the API | HTTPS on `*.execute-api.*` |
+| `true` | private S3 + CloudFront + OAC | HTTPS on `*.cloudfront.net` |
+
 
 ### Enterprise track (`infrastructure/terraform`)
 

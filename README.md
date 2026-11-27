@@ -9,7 +9,7 @@ The repository ships **two deployment tracks that share one application codebase
 
 | Track | What it provisions | Monthly cost | Status |
 |---|---|---|---|
-| **`infrastructure/serverless/`** | Lambda + API Gateway HTTP API + DynamoDB + S3 + CloudFront | **$0.00** (free tier) | Deployed automatically on push to `main` |
+| **`infrastructure/serverless/`** | Lambda + API Gateway HTTP API + DynamoDB + S3 (+ CloudFront when the account allows it) | **$0.00** (free tier) | Deployed automatically on push to `main` |
 | **`infrastructure/terraform/`** | VPC, ALB, ECS Fargate, RDS PostgreSQL, ECR, Secrets Manager, CloudWatch | ~$43-52 | Manual, explicitly confirmed, cost-gated |
 
 The enterprise track is the architecture from the specification. The serverless
@@ -25,14 +25,21 @@ demo.
 
 ```mermaid
 flowchart LR
-    U[Browser] -->|HTTPS| CF[CloudFront]
-    CF -->|OAC, private| S3[(S3: React SPA)]
-    U -->|HTTPS + CORS| APIGW[API Gateway HTTP API]
-    APIGW --> L[Lambda: FastAPI via Mangum]
+    U[Browser] -->|HTTPS| APIGW[API Gateway HTTP API]
+    APIGW -->|/api/*| L[Lambda: FastAPI via Mangum]
+    APIGW -->|/*| SPA[React SPA served by the same function]
     L --> DDB[(DynamoDB single table)]
     L --> LOGS[CloudWatch Logs]
     APIGW --> LOGS
+    CF[CloudFront] -.->|optional: private S3 + OAC| S3[(S3 bundle copy)]
 ```
+
+The SPA and the API share one HTTPS origin, so there is no CORS in play at all.
+`enable_cloudfront=true` moves static hosting to a private S3 bucket behind
+CloudFront with OAC, which is the better production shape (edge caching, immutable
+asset headers). It is off by default because **AWS blocks CloudFront creation on
+accounts that have not finished verification**; the API Gateway path keeps the
+platform deployable on day one.
 
 ### Enterprise track (cost-gated)
 
