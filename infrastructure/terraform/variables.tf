@@ -60,6 +60,12 @@ variable "az_count" {
   default = 2
 }
 
+variable "availability_zone_names" {
+  description = "Explicit AZs for the subnet layout. Pin these instead of discovering them."
+  type        = list(string)
+  default     = ["us-east-1a", "us-east-1b"]
+}
+
 # ---------------------------------------------------------------- application
 variable "image_tag" {
   description = "Image tag deployed to ECS. CI uses sha-<commit>."

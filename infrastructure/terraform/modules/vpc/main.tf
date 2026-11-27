@@ -21,6 +21,16 @@ variable "enable_nat_gateway" {
   default     = false
 }
 
+variable "availability_zone_names" {
+  description = <<-EOT
+    Explicit AZs to place subnets in. Pinned rather than discovered so that the
+    subnet layout cannot silently change when an account gains access to a new
+    zone. Must belong to var.aws_region and have at least var.az_count entries.
+  EOT
+  type        = list(string)
+  default     = ["us-east-1a", "us-east-1b"]
+}
+
 variable "tags" {
   description = "Common tags applied to all resources."
   type        = map(string)
@@ -29,13 +39,7 @@ variable "tags" {
 
 data "aws_availability_zones" "available" {
   state = "available"
-
-  # Pin the result set: without the opt-in filter the list can silently grow
-  # when an account gains access to additional zones.
-  filter {
-    name   = "opt-in-status"
-    values = ["opt-in-not-required"]
-  }
+  names = var.availability_zone_names
 }
 
 locals {

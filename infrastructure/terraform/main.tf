@@ -19,11 +19,12 @@ resource "terraform_data" "spend_gate" {
 module "vpc" {
   source = "./modules/vpc"
 
-  name_prefix        = local.name_prefix
-  vpc_cidr           = var.vpc_cidr
-  az_count           = var.az_count
-  enable_nat_gateway = var.enable_nat_gateway
-  tags               = local.common_tags
+  name_prefix             = local.name_prefix
+  vpc_cidr                = var.vpc_cidr
+  az_count                = var.az_count
+  availability_zone_names = var.availability_zone_names
+  enable_nat_gateway      = var.enable_nat_gateway
+  tags                    = local.common_tags
 
   depends_on = [terraform_data.spend_gate]
 }
