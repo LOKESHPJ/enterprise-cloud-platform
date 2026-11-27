@@ -37,13 +37,10 @@ variable "tags" {
   default     = {}
 }
 
-data "aws_availability_zones" "available" {
-  state = "available"
-  names = var.availability_zone_names
-}
-
 locals {
-  azs           = slice(data.aws_availability_zones.available.names, 0, var.az_count)
+  # No availability-zone data source: the layout is driven purely by the pinned
+  # variable so that adding a zone in the region cannot silently move a subnet.
+  azs           = slice(var.availability_zone_names, 0, var.az_count)
   public_cidrs  = [for index in range(var.az_count) : cidrsubnet(var.vpc_cidr, 8, index)]
   private_cidrs = [for index in range(var.az_count) : cidrsubnet(var.vpc_cidr, 8, index + 100)]
 }
