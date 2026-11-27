@@ -5,7 +5,6 @@ team would: infrastructure described in code, pipelines that authenticate withou
 keys, releases that can undo themselves, and a monthly bill that stays at zero.
 
 [![Deploy](https://github.com/LOKESHPJ/enterprise-cloud-platform/actions/workflows/deploy-serverless.yml/badge.svg)](https://github.com/LOKESHPJ/enterprise-cloud-platform/actions/workflows/deploy-serverless.yml)
-[![Security scanning](https://github.com/LOKESHPJ/enterprise-cloud-platform/actions/workflows/security-scan.yml/badge.svg)](https://github.com/LOKESHPJ/enterprise-cloud-platform/actions/workflows/security-scan.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 The application is a small storefront: browse a catalogue, add items to a cart, place an
