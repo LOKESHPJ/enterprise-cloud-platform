@@ -12,7 +12,7 @@ set -euo pipefail
 
 REPO="${REPO:-LOKESHPJ/enterprise-cloud-platform}"
 REGION="${REGION:-us-east-1}"
-PROJECT="${PROJECT:-ecp}"
+PROJECT="${PROJECT:-cloudforge}"
 
 ACCOUNT="$(aws sts get-caller-identity --query Account --output text)"
 STATE_BUCKET="${PROJECT}-tfstate-${ACCOUNT}"
@@ -214,7 +214,29 @@ cat > "${SERVERLESS_POLICY}" <<JSON
       "Resource": "*"
     },
     {
-      "Sid": "CloudWatchAlarms",
+      "Sid": "LambdaVersionsAndAliases",
+      "Effect": "Allow",
+      "Action": [
+        "lambda:PublishVersion", "lambda:CreateAlias", "lambda:DeleteAlias",
+        "lambda:GetAlias", "lambda:UpdateAlias", "lambda:ListAliases",
+        "lambda:ListVersionsByFunction"
+      ],
+      "Resource": "arn:aws:lambda:${REGION}:${ACCOUNT}:function:${PROJECT}-*"
+    },
+    {
+      "Sid": "CodeDeployCanary",
+      "Effect": "Allow",
+      "Action": "codedeploy:*",
+      "Resource": "*"
+    },
+    {
+      "Sid": "BudgetGuardrail",
+      "Effect": "Allow",
+      "Action": ["budgets:ModifyBudget", "budgets:ViewBudget"],
+      "Resource": "arn:aws:budgets::${ACCOUNT}:budget/*"
+    },
+    {
+      "Sid": "CloudwatchAlarms",
       "Effect": "Allow",
       "Action": [
         "cloudwatch:PutMetricAlarm", "cloudwatch:DeleteAlarms",
@@ -232,6 +254,7 @@ cat > "${SERVERLESS_POLICY}" <<JSON
         "iam:PutRolePolicy", "iam:DeleteRolePolicy", "iam:GetRolePolicy",
         "iam:AttachRolePolicy", "iam:DetachRolePolicy",
         "iam:ListAttachedRolePolicies", "iam:ListRolePolicies",
+        "iam:ListInstanceProfilesForRole",
         "iam:TagRole", "iam:UntagRole", "iam:UpdateAssumeRolePolicy"
       ],
       "Resource": "arn:aws:iam::${ACCOUNT}:role/${PROJECT}-*"
@@ -256,10 +279,175 @@ else
     --max-session-duration 3600 >/dev/null
 fi
 
-aws iam attach-role-policy --role-name "${TERRAFORM_ROLE}" \
-  --policy-arn "arn:aws:iam::aws:policy/PowerUserAccess"
-aws iam attach-role-policy --role-name "${TERRAFORM_ROLE}" \
-  --policy-arn "arn:aws:iam::aws:policy/IAMFullAccess"
+aws iam detach-role-policy --role-name "${TERRAFORM_ROLE}" \
+  --policy-arn "arn:aws:iam::aws:policy/PowerUserAccess" 2>/dev/null || true
+aws iam detach-role-policy --role-name "${TERRAFORM_ROLE}" \
+  --policy-arn "arn:aws:iam::aws:policy/IAMFullAccess" 2>/dev/null || true
+
+# Scoped platform policy.
+#
+# Deliberately NOT PowerUserAccess: this role can only touch the service
+# families the platform provisions, only IAM roles and policies under the
+# ${PROJECT}- prefix, and only the state bucket and lock table. It cannot read
+# arbitrary S3 data, cannot touch IAM users or keys (also denied explicitly
+# below), and cannot reach Organizations or the Account API.
+echo "==> Applying scoped platform policy to ${TERRAFORM_ROLE}"
+TERRAFORM_POLICY="$(mktemp)"
+cat > "${TERRAFORM_POLICY}" <<JSON
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "Discover",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:Describe*", "ecs:Describe*", "ecs:List*", "ecr:Describe*",
+        "ecr:List*", "rds:Describe*", "elasticloadbalancing:Describe*",
+        "cloudwatch:Describe*", "cloudwatch:List*", "logs:Describe*",
+        "application-autoscaling:Describe*", "autoscaling:Describe*",
+        "kms:DescribeKey", "kms:ListAliases", "kms:ListResourceTags",
+        "sts:GetCallerIdentity", "tag:GetResources"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "Networking",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:CreateVpc", "ec2:DeleteVpc", "ec2:ModifyVpcAttribute",
+        "ec2:CreateSubnet", "ec2:DeleteSubnet", "ec2:ModifySubnetAttribute",
+        "ec2:CreateRouteTable", "ec2:DeleteRouteTable", "ec2:CreateRoute",
+        "ec2:DeleteRoute", "ec2:ReplaceRoute", "ec2:AssociateRouteTable",
+        "ec2:DisassociateRouteTable", "ec2:ReplaceRouteTableAssociation",
+        "ec2:CreateInternetGateway", "ec2:DeleteInternetGateway",
+        "ec2:AttachInternetGateway", "ec2:DetachInternetGateway",
+        "ec2:AllocateAddress", "ec2:ReleaseAddress",
+        "ec2:CreateNatGateway", "ec2:DeleteNatGateway",
+        "ec2:CreateSecurityGroup", "ec2:DeleteSecurityGroup",
+        "ec2:AuthorizeSecurityGroupIngress", "ec2:AuthorizeSecurityGroupEgress",
+        "ec2:RevokeSecurityGroupIngress", "ec2:RevokeSecurityGroupEgress",
+        "ec2:CreateTags", "ec2:DeleteTags", "ec2:DescribeTags"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "Containers",
+      "Effect": "Allow",
+      "Action": [
+        "ecr:CreateRepository", "ecr:DeleteRepository", "ecr:ListTagsForResource",
+        "ecr:TagResource", "ecr:PutLifecyclePolicy", "ecr:GetLifecyclePolicy",
+        "ecr:DeleteLifecyclePolicy", "ecr:PutImageScanningConfiguration",
+        "ecr:SetRepositoryPolicy", "ecr:DeleteRepositoryPolicy",
+        "ecs:CreateCluster", "ecs:DeleteCluster", "ecs:UpdateCluster",
+        "ecs:RegisterTaskDefinition", "ecs:DeregisterTaskDefinition",
+        "ecs:TagResource", "ecs:UntagResource",
+        "ecs:CreateService", "ecs:UpdateService", "ecs:DeleteService"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "LoadBalancing",
+      "Effect": "Allow",
+      "Action": [
+        "elasticloadbalancing:CreateLoadBalancer",
+        "elasticloadbalancing:DeleteLoadBalancer",
+        "elasticloadbalancing:ModifyLoadBalancerAttributes",
+        "elasticloadbalancing:SetSecurityGroups", "elasticloadbalancing:SetSubnets",
+        "elasticloadbalancing:CreateTargetGroup",
+        "elasticloadbalancing:DeleteTargetGroup",
+        "elasticloadbalancing:ModifyTargetGroup",
+        "elasticloadbalancing:ModifyTargetGroupAttributes",
+        "elasticloadbalancing:CreateListener", "elasticloadbalancing:DeleteListener",
+        "elasticloadbalancing:ModifyListener",
+        "elasticloadbalancing:CreateRule", "elasticloadbalancing:DeleteRule",
+        "elasticloadbalancing:ModifyRule",
+        "elasticloadbalancing:AddTags", "elasticloadbalancing:RemoveTags"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "Database",
+      "Effect": "Allow",
+      "Action": [
+        "rds:CreateDBInstance", "rds:DeleteDBInstance", "rds:ModifyDBInstance",
+        "rds:CreateDBSubnetGroup", "rds:DeleteDBSubnetGroup",
+        "rds:ModifyDBSubnetGroup", "rds:CreateDBParameterGroup",
+        "rds:DeleteDBParameterGroup", "rds:ModifyDBParameterGroup",
+        "rds:AddTagsToResource", "rds:RemoveTagsFromResource",
+        "rds:ListTagsForResource"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "Secrets",
+      "Effect": "Allow",
+      "Action": [
+        "secretsmanager:CreateSecret", "secretsmanager:DeleteSecret",
+        "secretsmanager:DescribeSecret", "secretsmanager:GetSecretValue",
+        "secretsmanager:PutSecretValue", "secretsmanager:UpdateSecret",
+        "secretsmanager:TagResource", "secretsmanager:UntagResource",
+        "secretsmanager:GetResourcePolicy", "secretsmanager:PutResourcePolicy",
+        "secretsmanager:DeleteResourcePolicy"
+      ],
+      "Resource": "arn:aws:secretsmanager:${REGION}:${ACCOUNT}:secret:${PROJECT}-*"
+    },
+    {
+      "Sid": "Observability",
+      "Effect": "Allow",
+      "Action": [
+        "logs:CreateLogGroup", "logs:DeleteLogGroup", "logs:PutRetentionPolicy",
+        "logs:DeleteRetentionPolicy", "logs:TagResource", "logs:UntagResource",
+        "logs:ListTagsForResource", "logs:DescribeLogGroups",
+        "cloudwatch:PutMetricAlarm", "cloudwatch:DeleteAlarms",
+        "cloudwatch:DescribeAlarms", "cloudwatch:PutDashboard",
+        "cloudwatch:DeleteDashboards", "cloudwatch:GetDashboard",
+        "cloudwatch:TagResource", "cloudwatch:UntagResource",
+        "cloudwatch:ListTagsForResource",
+        "application-autoscaling:RegisterScalableTarget",
+        "application-autoscaling:DeregisterScalableTarget",
+        "application-autoscaling:PutScalingPolicy",
+        "application-autoscaling:DeleteScalingPolicy",
+        "application-autoscaling:TagResource", "application-autoscaling:UntagResource"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "ProjectRolesOnly",
+      "Effect": "Allow",
+      "Action": [
+        "iam:CreateRole", "iam:DeleteRole", "iam:GetRole", "iam:PassRole",
+        "iam:TagRole", "iam:UntagRole", "iam:PutRolePolicy",
+        "iam:DeleteRolePolicy", "iam:GetRolePolicy",
+        "iam:AttachRolePolicy", "iam:DetachRolePolicy",
+        "iam:ListRolePolicies", "iam:ListAttachedRolePolicies",
+        "iam:UpdateAssumeRolePolicy", "iam:ListInstanceProfilesForRole"
+      ],
+      "Resource": "arn:aws:iam::${ACCOUNT}:role/${PROJECT}-*"
+    },
+    {
+      "Sid": "TerraformState",
+      "Effect": "Allow",
+      "Action": ["s3:Get*", "s3:Put*", "s3:List*", "s3:Delete*"],
+      "Resource": "arn:aws:s3:::${PROJECT}-tfstate-${ACCOUNT}"
+    },
+    {
+      "Sid": "TerraformStateObjects",
+      "Effect": "Allow",
+      "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
+      "Resource": "arn:aws:s3:::${PROJECT}-tfstate-${ACCOUNT}/*"
+    },
+    {
+      "Sid": "StateLock",
+      "Effect": "Allow",
+      "Action": ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:DeleteItem", "dynamodb:DescribeTable"],
+      "Resource": "arn:aws:dynamodb:${REGION}:${ACCOUNT}:table/${LOCK_TABLE}"
+    }
+  ]
+}
+JSON
+
+aws iam put-role-policy --role-name "${TERRAFORM_ROLE}" \
+  --policy-name "platform-scoped-deploy" --policy-document "file://${TERRAFORM_POLICY}"
 
 echo "==> Denying the enterprise role permission to touch IAM users or access keys"
 DENY_POLICY="$(mktemp)"

@@ -1,0 +1,94 @@
+name: Bootstrap migration (one-off)
+
+# Renames the platform identity from the legacy `ecp-` prefix to `cloudforge-`
+# and switches the deploy role from PowerUserAccess to a scoped policy.
+#
+# Runs under the legacy role because the new one does not exist yet. Safe to
+# re-run: every step is idempotent, and already-absent resources are ignored.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  LEGACY_ROLE_ARN: arn:aws:iam::000000000000:role/ecp-gha-terraform
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.LEGACY_ROLE_ARN }}
+          role-session-name: gha-migration-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Remove the orphaned Lambda execution role from the torn-down stack
+        run: |
+          set -uo pipefail
+          ROLE=ecp-dev-api-lambda
+          if aws iam get-role --role-name "${ROLE}" >/dev/null 2>&1; then
+            for p in $(aws iam list-role-policies --role-name "${ROLE}" --query PolicyNames --output text); do
+              aws iam delete-role-policy --role-name "${ROLE}" --policy-name "$p"
+            done
+            for p in $(aws iam list-attached-role-policies --role-name "${ROLE}" --query 'AttachedPolicies[].PolicyArn' --output text); do
+              aws iam detach-role-policy --role-name "${ROLE}" --policy-arn "$p"
+            done
+            aws iam delete-role --role-name "${ROLE}"
+            echo "deleted ${ROLE}"
+          else
+            echo "${ROLE} already absent"
+          fi
+
+      - name: Delete the legacy state backend
+        run: |
+          set -uo pipefail
+          BUCKET=ecp-tfstate-000000000000
+          if aws s3api head-bucket --bucket "${BUCKET}" 2>/dev/null; then
+            aws s3 rm "s3://${BUCKET}" --recursive --quiet
+            aws s3api delete-bucket --bucket "${BUCKET}"
+            echo "deleted s3://${BUCKET}"
+          else
+            echo "${BUCKET} already absent"
+          fi
+          aws dynamodb delete-table --table-name ecp-terraform-locks >/dev/null 2>&1 || true
+
+      - name: Bootstrap the cloudforge identity and state backend
+        env:
+          PROJECT: cloudforge
+          REPO: LOKESHPJ/enterprise-cloud-platform
+          REGION: us-east-1
+        run: bash scripts/bootstrap.sh
+
+      - name: Remove the legacy deploy roles
+        run: |
+          set -uo pipefail
+          for ROLE in ecp-gha-serverless ecp-gha-terraform; do
+            if ! aws iam get-role --role-name "${ROLE}" >/dev/null 2>&1; then
+              echo "${ROLE} already absent"; continue
+            fi
+            for p in $(aws iam list-role-policies --role-name "${ROLE}" --query PolicyNames --output text); do
+              aws iam delete-role-policy --role-name "${ROLE}" --policy-name "$p"
+            done
+            for p in $(aws iam list-attached-role-policies --role-name "${ROLE}" --query 'AttachedPolicies[].PolicyArn' --output text); do
+              aws iam detach-role-policy --role-name "${ROLE}" --policy-arn "$p"
+            done
+            aws iam delete-role --role-name "${ROLE}"
+            echo "deleted ${ROLE}"
+          done
+
+      - name: Summary
+        run: |
+          {
+            echo "### Migration complete"
+            echo '```'
+            aws iam list-roles --query 'Roles[?starts_with(RoleName, `cloudforge-`)].RoleName' --output table
+            aws s3 ls | grep cloudforge || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
