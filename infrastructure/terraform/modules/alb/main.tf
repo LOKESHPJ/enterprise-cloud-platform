@@ -56,6 +56,7 @@ resource "aws_lb" "this" {
   enable_deletion_protection       = false
   enable_http2                     = true
   enable_cross_zone_load_balancing = true
+  drop_invalid_header_fields       = true
 
   tags = merge(var.tags, { Name = "${var.name_prefix}-alb" })
 }

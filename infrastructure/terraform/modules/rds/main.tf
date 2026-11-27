@@ -113,9 +113,11 @@ resource "aws_db_instance" "this" {
   allow_major_version_upgrade = false
   apply_immediately           = true
 
-  performance_insights_enabled = false
-  monitoring_interval          = 0
-  copy_tags_to_snapshot        = true
+  performance_insights_enabled          = true
+  performance_insights_retention_period = 7 # free tier: seven days of retention
+  enabled_cloudwatch_logs_exports       = ["postgresql", "upgrade"]
+  monitoring_interval                   = 0
+  copy_tags_to_snapshot                 = true
 
   deletion_protection       = var.deletion_protection
   skip_final_snapshot       = true

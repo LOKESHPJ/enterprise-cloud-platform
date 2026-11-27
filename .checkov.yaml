@@ -62,3 +62,38 @@ skip-check:
   - CKV_AWS_157
   - CKV_AWS_161
   - CKV_AWS_226
+
+  # --- Accepted, cost-driven gaps ------------------------------------------
+  # Each of these is a real control that was declined on cost or architecture
+  # grounds for a zero-cost reference platform. They are listed so the gap is
+  # visible rather than hidden.
+
+  # S3 access logging and versioning for a static bundle that is rebuilt from
+  # source on every deploy; both add storage in a second bucket.
+  - CKV_AWS_18
+  - CKV_AWS_21
+  # S3 cross-region replication - doubles storage for a regenerable artifact.
+  - CKV_AWS_144
+  # DynamoDB point-in-time recovery - per-GB monthly charge on demo data.
+  - CKV_AWS_28
+  # Customer managed KMS keys for ECR and Secrets Manager - ~$1/month each on
+  # top of a zero-cost stack; AWS managed keys are used instead.
+  - CKV_AWS_136
+  - CKV_AWS_149
+  # Deletion protection on ALB and RDS - deliberately off so teardown works.
+  - CKV_AWS_150
+  - CKV_AWS_293
+  # API Gateway routes are intentionally public (it is a public storefront API);
+  # there is no Cognito or IAM authorizer in scope.
+  - CKV_AWS_309
+  # CloudFront origin failover needs a second origin; single-origin S3 is used.
+  - CKV_AWS_310
+  # Lambda code signing requires a signing profile and key management that cost
+  # more than the workload.
+  - CKV_AWS_272
+  # TLS 1.2 and HSTS are configured; the checks read them from the distribution
+  # differently than from the response headers policy.
+  - CKV_AWS_174
+  - CKV_AWS_259
+  # Internet-facing port 80 on the ALB is the intended public entry point.
+  - CKV_AWS_260

@@ -38,7 +38,8 @@ variable "tags" {
 }
 
 resource "aws_sns_topic" "alerts" {
-  name = "${var.name_prefix}-alerts"
+  name              = "${var.name_prefix}-alerts"
+  kms_master_key_id = "alias/aws/sns"
 
   tags = merge(var.tags, { Name = "${var.name_prefix}-alerts" })
 }
