@@ -18,6 +18,7 @@ env:
   TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET || 'ecp-tfstate-000000000000' }}
   TF_LOCK_TABLE: ecp-terraform-locks
   AWS_SERVERLESS_ROLE_ARN: ${{ vars.AWS_SERVERLESS_ROLE_ARN || 'arn:aws:iam::000000000000:role/ecp-gha-serverless' }}
+  ENABLE_CLOUDFRONT: ${{ vars.ENABLE_CLOUDFRONT || 'false' }}
   TF_IN_AUTOMATION: "true"
   TF_INPUT: "0"
 
@@ -59,7 +60,7 @@ jobs:
       - run: terraform fmt -check -recursive
       - run: terraform validate
       - name: Plan
-        run: terraform plan -input=false -no-color -lock=false | tee plan.txt
+        run: terraform plan -input=false -no-color -lock=false -var="enable_cloudfront=${ENABLE_CLOUDFRONT}" | tee plan.txt
       - name: Summary
         run: |
           {

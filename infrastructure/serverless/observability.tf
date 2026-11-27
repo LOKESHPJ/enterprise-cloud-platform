@@ -99,10 +99,10 @@ resource "aws_cloudwatch_dashboard" "platform" {
           view   = "timeSeries"
           stat   = "Sum"
           period = 300
-          metrics = [
-            ["AWS/CloudFront", "Requests", "DistributionId", aws_cloudfront_distribution.web.id, "Region", "Global"],
-            ["AWS/CloudFront", "5xxErrorRate", "DistributionId", aws_cloudfront_distribution.web.id, "Region", "Global"],
-          ]
+          metrics = var.enable_cloudfront ? [
+            ["AWS/CloudFront", "Requests", "DistributionId", aws_cloudfront_distribution.web[0].id, "Region", "Global"],
+            ["AWS/CloudFront", "5xxErrorRate", "DistributionId", aws_cloudfront_distribution.web[0].id, "Region", "Global"],
+          ] : []
         }
       },
       {

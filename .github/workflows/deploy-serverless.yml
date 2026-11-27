@@ -26,6 +26,7 @@ env:
   TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET || 'ecp-tfstate-000000000000' }}
   TF_LOCK_TABLE: ecp-terraform-locks
   AWS_SERVERLESS_ROLE_ARN: ${{ vars.AWS_SERVERLESS_ROLE_ARN || 'arn:aws:iam::000000000000:role/ecp-gha-serverless' }}
+  ENABLE_CLOUDFRONT: ${{ vars.ENABLE_CLOUDFRONT || 'false' }}
   TF_IN_AUTOMATION: "true"
   TF_INPUT: "0"
 
@@ -110,7 +111,7 @@ jobs:
         run: terraform validate
 
       - name: Terraform plan
-        run: terraform plan -input=false -out=tfplan -var="app_version=${GITHUB_SHA::8}"
+        run: terraform plan -input=false -out=tfplan -var="app_version=${GITHUB_SHA::8}" -var="enable_cloudfront=${ENABLE_CLOUDFRONT}"
 
       - name: Terraform apply
         run: terraform apply -input=false -auto-approve tfplan
@@ -163,6 +164,7 @@ jobs:
             --cache-control "no-cache,no-store,must-revalidate"
 
       - name: Invalidate CloudFront
+        if: needs.provision.outputs.distribution_id != ''
         env:
           DISTRIBUTION_ID: ${{ needs.provision.outputs.distribution_id }}
         run: |

@@ -20,6 +20,13 @@ LOCK_TABLE="${PROJECT}-terraform-locks"
 OIDC_HOST="token.actions.githubusercontent.com"
 OIDC_ARN="arn:aws:iam::${ACCOUNT}:oidc-provider/${OIDC_HOST}"
 
+# GitHub now issues immutable subject claims that embed numeric owner/repo IDs:
+#   repo:OWNER@<owner-id>/REPO@<repo-id>:ref:refs/heads/main
+# Both the classic and the immutable forms are allowed below so the role keeps
+# working if the repository predates immutable subjects.
+REPO_OWNER="${REPO%%/*}"
+REPO_NAME="${REPO#*/}"
+
 echo "==> Account ${ACCOUNT} / region ${REGION} / repo ${REPO}"
 
 # ---------------------------------------------------------------- OIDC provider
@@ -93,7 +100,9 @@ cat > "${TRUST_POLICY}" <<JSON
         "StringLike": {
           "${OIDC_HOST}:sub": [
             "repo:${REPO}:ref:refs/heads/main",
-            "repo:${REPO}:environment:*"
+            "repo:${REPO}:environment:*",
+            "repo:${REPO_OWNER}@*/${REPO_NAME}@*:ref:refs/heads/main",
+            "repo:${REPO_OWNER}@*/${REPO_NAME}@*:environment:*"
           ]
         }
       }
@@ -123,22 +132,20 @@ cat > "${SERVERLESS_POLICY}" <<JSON
     {
       "Sid": "TerraformState",
       "Effect": "Allow",
-      "Action": [
-        "s3:ListBucket", "s3:GetBucketLocation", "s3:GetBucketVersioning",
-        "s3:PutBucketVersioning", "s3:GetEncryptionConfiguration",
-        "s3:PutEncryptionConfiguration", "s3:GetBucketPolicy",
-        "s3:PutBucketPolicy", "s3:DeleteBucketPolicy",
-        "s3:GetBucketPublicAccessBlock", "s3:PutBucketPublicAccessBlock",
-        "s3:GetBucketOwnershipControls", "s3:PutBucketOwnershipControls",
-        "s3:CreateBucket", "s3:DeleteBucket"
-      ],
+      "Action": ["s3:Get*", "s3:Put*", "s3:List*", "s3:Delete*"],
       "Resource": "arn:aws:s3:::${PROJECT}-*"
     },
     {
       "Sid": "ObjectAccess",
       "Effect": "Allow",
-      "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
+      "Action": ["s3:Get*", "s3:Put*", "s3:Delete*"],
       "Resource": "arn:aws:s3:::${PROJECT}-*/*"
+    },
+    {
+      "Sid": "BucketLifecycle",
+      "Effect": "Allow",
+      "Action": ["s3:CreateBucket", "s3:DeleteBucket", "s3:ListAllMyBuckets"],
+      "Resource": "*"
     },
     {
       "Sid": "StateLock",
@@ -152,7 +159,8 @@ cat > "${SERVERLESS_POLICY}" <<JSON
       "Action": [
         "dynamodb:CreateTable", "dynamodb:DeleteTable", "dynamodb:DescribeTable",
         "dynamodb:UpdateTable", "dynamodb:UpdateTimeToLive", "dynamodb:TagResource",
-        "dynamodb:ListTagsOfResource", "dynamodb:DescribeContinuousBackups"
+        "dynamodb:ListTagsOfResource", "dynamodb:DescribeContinuousBackups",
+        "dynamodb:DescribeTimeToLive"
       ],
       "Resource": "arn:aws:dynamodb:${REGION}:${ACCOUNT}:table/${PROJECT}-*"
     },
@@ -166,7 +174,9 @@ cat > "${SERVERLESS_POLICY}" <<JSON
         "lambda:RemovePermission", "lambda:GetPolicy",
         "lambda:ListVersionsByFunction", "lambda:PublishVersion",
         "lambda:TagResource", "lambda:UntagResource", "lambda:ListTags",
-        "lambda:GetAccountSettings", "lambda:PutFunctionConcurrency"
+        "lambda:GetAccountSettings", "lambda:PutFunctionConcurrency",
+        "lambda:GetFunctionCodeSigningConfig", "lambda:GetFunctionEventInvokeConfig",
+        "lambda:GetFunctionUrlConfig", "lambda:ListTags"
       ],
       "Resource": "arn:aws:lambda:${REGION}:${ACCOUNT}:function:${PROJECT}-*"
     },
@@ -193,6 +203,15 @@ cat > "${SERVERLESS_POLICY}" <<JSON
         "logs:DescribeResourcePolicies"
       ],
       "Resource": "arn:aws:logs:${REGION}:${ACCOUNT}:log-group:*"
+    },
+    {
+      "Sid": "ApiGatewayAccessLogging",
+      "Effect": "Allow",
+      "Action": [
+        "logs:CreateLogDelivery", "logs:DeleteLogDelivery", "logs:GetLogDelivery",
+        "logs:UpdateLogDelivery", "logs:ListLogDeliveries"
+      ],
+      "Resource": "*"
     },
     {
       "Sid": "CloudWatchAlarms",

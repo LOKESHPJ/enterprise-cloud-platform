@@ -1,6 +1,15 @@
 output "site_url" {
-  description = "Public HTTPS URL of the React frontend."
-  value       = "https://${aws_cloudfront_distribution.web.domain_name}"
+  description = "Public URL of the React frontend. HTTPS when CloudFront is enabled."
+  value = var.enable_cloudfront ? (
+    "https://${aws_cloudfront_distribution.web[0].domain_name}"
+    ) : (
+    "http://${aws_s3_bucket_website_configuration.web[0].website_endpoint}"
+  )
+}
+
+output "frontend_hosting" {
+  description = "cloudfront (HTTPS) or s3-website (HTTP fallback while the account is unverified)."
+  value       = var.enable_cloudfront ? "cloudfront" : "s3-website"
 }
 
 output "api_base_url" {
@@ -24,8 +33,8 @@ output "frontend_bucket" {
 }
 
 output "cloudfront_distribution_id" {
-  description = "Distribution ID, used for cache invalidation after upload."
-  value       = aws_cloudfront_distribution.web.id
+  description = "Distribution ID, used for cache invalidation after upload. Empty in S3 website mode."
+  value       = var.enable_cloudfront ? aws_cloudfront_distribution.web[0].id : ""
 }
 
 output "dynamodb_table" {
@@ -43,6 +52,5 @@ output "log_groups" {
   value = {
     lambda = aws_cloudwatch_log_group.lambda.name
     api    = aws_cloudwatch_log_group.api_access.name
-    alarms = "see CloudWatch console"
   }
 }
