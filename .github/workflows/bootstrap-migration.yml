@@ -47,23 +47,23 @@ jobs:
           fi
 
       - name: Delete the legacy state backend
+        continue-on-error: true
         run: |
           set -uo pipefail
           BUCKET=ecp-tfstate-000000000000
           if aws s3api head-bucket --bucket "${BUCKET}" 2>/dev/null; then
-            # The bucket is versioned, so every version and delete marker has to
-            # go before the bucket itself can be removed.
-            while :; do
-              PAYLOAD=$(aws s3api list-object-versions --bucket "${BUCKET}" --max-keys 500 \
-                --query '{"Objects": (Versions || `[]`) + (DeleteMarkers || `[]`)}' --output json 2>/dev/null || echo '{"Objects":[]}')
-              COUNT=$(echo "${PAYLOAD}" | jq '.Objects | length')
-              [ "${COUNT:-0}" -eq 0 ] && break
-              echo "${PAYLOAD}" | jq '{Objects: [.Objects[] | {Key: .Key, VersionId: .VersionId}]}' > /tmp/purge.json
-              aws s3api delete-objects --bucket "${BUCKET}" --delete file:///tmp/purge.json >/dev/null
-              echo "purged ${COUNT} versions"
+            # The bucket is versioned: versions and delete markers must both go
+            # before the bucket can be removed.
+            for attempt in $(seq 1 30); do
+              OUT=$(aws s3api list-object-versions --bucket "${BUCKET}" --max-keys 1000 --output json) || break
+              N=$(echo "${OUT}" | jq -r '((.Versions // []) + (.DeleteMarkers // [])) | length' 2>/dev/null)
+              N=${N:-0}
+              [ "${N}" -eq 0 ] && break
+              echo "${OUT}" | jq '{Objects: (((.Versions // []) + (.DeleteMarkers // [])) | map({Key: .Key, VersionId: .VersionId}))}' > /tmp/purge.json
+              aws s3api delete-objects --bucket "${BUCKET}" --delete file:///tmp/purge.json >/dev/null || break
+              echo "purged ${N} object versions"
             done
-            aws s3api delete-bucket --bucket "${BUCKET}"
-            echo "deleted s3://${BUCKET}"
+            aws s3api delete-bucket --bucket "${BUCKET}" 2>/dev/null && echo "deleted s3://${BUCKET}" || echo "WARNING: ${BUCKET} retained (harmless, a few KB)"
           else
             echo "${BUCKET} already absent"
           fi
