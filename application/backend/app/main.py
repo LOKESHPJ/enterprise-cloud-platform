@@ -10,10 +10,12 @@ from __future__ import annotations
 
 import logging
 import time
+from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.api import health, orders, products
 from app.config import settings
@@ -71,14 +73,43 @@ app.include_router(health.router, prefix="/api")
 app.include_router(products.router, prefix="/api")
 app.include_router(orders.router, prefix="/api")
 
+# ---------------------------------------------------------------------------
+# Optional SPA hosting from the same process.
+#
+# Lambda mode bundles the built React app into `static/` next to the `app`
+# package, so one HTTPS origin serves both the UI and the API (no CORS, no
+# CloudFront dependency). In the container track the bundle is served by nginx
+# instead, `static/` is absent, and this block is skipped.
+# ---------------------------------------------------------------------------
+STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
+SPA_AVAILABLE = (STATIC_DIR / "index.html").is_file()
 
-@app.get("/", include_in_schema=False)
-def root() -> dict[str, str]:
-    return {
-        "service": settings.app_name,
-        "version": settings.version,
-        "environment": settings.environment,
-        "storage_backend": settings.storage_backend,
-        "docs": "/api/docs",
-        "health": "/api/health",
-    }
+if SPA_AVAILABLE:
+    assets_dir = STATIC_DIR / "assets"
+    if assets_dir.is_dir():
+        app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    def serve_spa(full_path: str) -> FileResponse:
+        if full_path == "api" or full_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="not found")
+
+        candidate = (STATIC_DIR / full_path).resolve()
+        if full_path and candidate.is_file() and STATIC_DIR.resolve() in candidate.parents:
+            return FileResponse(candidate)
+
+        # Client side routing: any unknown path renders the SPA shell.
+        return FileResponse(STATIC_DIR / "index.html")
+
+else:
+
+    @app.get("/", include_in_schema=False)
+    def root() -> dict[str, str]:
+        return {
+            "service": settings.app_name,
+            "version": settings.version,
+            "environment": settings.environment,
+            "storage_backend": settings.storage_backend,
+            "docs": "/api/docs",
+            "health": "/api/health",
+        }

@@ -45,6 +45,14 @@ resource "aws_apigatewayv2_route" "api_proxy" {
   target    = "integrations/${aws_apigatewayv2_integration.lambda.id}"
 }
 
+# Catch-all so the Lambda can serve the SPA bundle when CloudFront is unavailable.
+# API Gateway prefers the more specific /api/{proxy+} route for API traffic.
+resource "aws_apigatewayv2_route" "spa_catch_all" {
+  api_id    = aws_apigatewayv2_api.api.id
+  route_key = "$default"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+}
+
 resource "aws_apigatewayv2_stage" "default" {
   api_id      = aws_apigatewayv2_api.api.id
   name        = "$default"

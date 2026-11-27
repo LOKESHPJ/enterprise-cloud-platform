@@ -86,17 +86,31 @@ jobs:
         with:
           python-version: "3.12"
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Build SPA for same-origin hosting
+        working-directory: application/frontend
+        env:
+          VITE_API_BASE_URL: ""
+        run: |
+          npm install --no-audit --no-fund
+          npm run build
+
       - name: Build Lambda package
         working-directory: application/backend
         run: |
           set -euo pipefail
-          mkdir -p ../../dist/lambda
+          mkdir -p ../../dist/lambda/static
           python -m pip install --quiet --target ../../dist/lambda -r requirements-lambda.txt
           cp -r app ../../dist/lambda/
           cp lambda_handler.py ../../dist/lambda/
+          cp -r ../frontend/dist/. ../../dist/lambda/static/
           cd ../../dist/lambda
           zip -qr ../lambda.zip . -x "*.pyc" -x "*/__pycache__/*"
           ls -lh ../lambda.zip
+          du -sh static
 
       - name: Terraform init
         run: |

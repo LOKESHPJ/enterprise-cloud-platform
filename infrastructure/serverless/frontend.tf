@@ -36,9 +36,9 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "web" {
 # ---------------------------------------------------------------------------
 # CloudFront mode (default): bucket stays private, CloudFront reads via OAC.
 # ---------------------------------------------------------------------------
-resource "aws_s3_bucket_public_access_block" "web_private" {
-  count = var.enable_cloudfront ? 1 : 0
-
+# The bucket is private in both modes; in CloudFront mode only CloudFront reads
+# it through OAC. One PAB resource, because S3 stores a single configuration.
+resource "aws_s3_bucket_public_access_block" "web_always" {
   bucket = aws_s3_bucket.web.id
 
   block_public_acls       = true
@@ -85,7 +85,7 @@ resource "aws_s3_bucket_policy" "web_private" {
   bucket = aws_s3_bucket.web.id
   policy = data.aws_iam_policy_document.web_bucket_private[0].json
 
-  depends_on = [aws_s3_bucket_public_access_block.web_private]
+  depends_on = [aws_s3_bucket_public_access_block.web_always]
 }
 
 resource "aws_cloudfront_response_headers_policy" "web" {
@@ -181,56 +181,7 @@ resource "aws_cloudfront_distribution" "web" {
 }
 
 # ---------------------------------------------------------------------------
-# S3 website mode: used only while the account is unverified.
-# This trades HTTPS for availability; it is not the recommended production path.
+# Lambda mode: the same function serves the SPA at / and the API at /api.
+# Used while the account cannot create CloudFront distributions, and it also
+# removes CORS entirely because the browser sees a single origin.
 # ---------------------------------------------------------------------------
-resource "aws_s3_bucket_public_access_block" "web_public" {
-  count = var.enable_cloudfront ? 0 : 1
-
-  bucket = aws_s3_bucket.web.id
-
-  block_public_acls       = false
-  block_public_policy     = false
-  ignore_public_acls      = false
-  restrict_public_buckets = false
-}
-
-resource "aws_s3_bucket_website_configuration" "web" {
-  count = var.enable_cloudfront ? 0 : 1
-
-  bucket = aws_s3_bucket.web.id
-
-  index_document {
-    suffix = "index.html"
-  }
-
-  # Serves index.html for client side routes, mirroring the CloudFront behaviour.
-  error_document {
-    key = "index.html"
-  }
-}
-
-data "aws_iam_policy_document" "web_bucket_public" {
-  count = var.enable_cloudfront ? 0 : 1
-
-  statement {
-    sid       = "PublicReadForWebsiteEndpoint"
-    effect    = "Allow"
-    actions   = ["s3:GetObject"]
-    resources = ["${aws_s3_bucket.web.arn}/*"]
-
-    principals {
-      type        = "*"
-      identifiers = ["*"]
-    }
-  }
-}
-
-resource "aws_s3_bucket_policy" "web_public" {
-  count = var.enable_cloudfront ? 0 : 1
-
-  bucket = aws_s3_bucket.web.id
-  policy = data.aws_iam_policy_document.web_bucket_public[0].json
-
-  depends_on = [aws_s3_bucket_public_access_block.web_public]
-}

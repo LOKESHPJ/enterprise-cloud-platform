@@ -1,15 +1,15 @@
 output "site_url" {
-  description = "Public URL of the React frontend. HTTPS when CloudFront is enabled."
+  description = "Public URL of the React frontend. HTTPS when CloudFront or the Lambda SPA is used."
   value = var.enable_cloudfront ? (
     "https://${aws_cloudfront_distribution.web[0].domain_name}"
     ) : (
-    "http://${aws_s3_bucket_website_configuration.web[0].website_endpoint}"
+    aws_apigatewayv2_api.api.api_endpoint
   )
 }
 
 output "frontend_hosting" {
-  description = "cloudfront (HTTPS) or s3-website (HTTP fallback while the account is unverified)."
-  value       = var.enable_cloudfront ? "cloudfront" : "s3-website"
+  description = "cloudfront (private S3 + OAC) or lambda (SPA served by the API function over HTTPS)."
+  value       = var.enable_cloudfront ? "cloudfront" : "lambda"
 }
 
 output "api_base_url" {
