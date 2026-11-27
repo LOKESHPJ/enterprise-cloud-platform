@@ -1,0 +1,38 @@
+name: Patch deploy policy (one-off)
+
+# Adds the Budgets tagging permissions that Terraform needs to apply default tags
+# to the budget resource. Runs under the terraform role, which may modify any
+# cloudforge-* role policy. Idempotent.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::000000000000:role/cloudforge-gha-terraform
+          role-session-name: gha-patch-${{ github.run_id }}
+          aws-region: us-east-1
+
+      - name: Add budget tagging permissions to the serverless role
+        run: |
+          set -euo pipefail
+          ROLE=cloudforge-gha-serverless
+          POLICY=serverless-deploy
+          aws iam get-role-policy --role-name "${ROLE}" --policy-name "${POLICY}" \
+            --query PolicyDocument --output json > /tmp/policy.json
+          jq '.Statement |= map(
+                if .Sid == "BudgetGuardrail"
+                then .Action = ["budgets:ModifyBudget","budgets:ViewBudget","budgets:TagResource","budgets:UntagResource","budgets:ListTagsForResource"]
+                else . end)' /tmp/policy.json > /tmp/patched.json
+          aws iam put-role-policy --role-name "${ROLE}" --policy-name "${POLICY}" \
+            --policy-document file:///tmp/patched.json
+          echo "Patched ${ROLE}:"
+          jq '.Statement[] | select(.Sid=="BudgetGuardrail")' /tmp/patched.json
