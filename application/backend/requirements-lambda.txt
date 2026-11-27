@@ -1,0 +1,6 @@
+# Lambda bundle: no SQLAlchemy, no psycopg2, no uvicorn.
+# boto3 is provided by the Lambda runtime and must not be vendored.
+fastapi==0.115.6
+pydantic==2.10.4
+email-validator==2.2.0
+mangum==0.19.0

@@ -1,0 +1,223 @@
+name: Deploy serverless (free tier)
+
+# The zero-cost track: Lambda + HTTP API + DynamoDB + S3 + CloudFront.
+# Runs on GitHub's runners. Nothing executes on a developer machine.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "application/**"
+      - "infrastructure/serverless/**"
+      - ".github/workflows/deploy-serverless.yml"
+  workflow_dispatch:
+
+permissions:
+  id-token: write # OIDC: short-lived AWS credentials, no stored secrets
+  contents: read
+
+concurrency:
+  group: serverless-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-1
+  TF_VERSION: 1.17.2
+  TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET || 'ecp-tfstate-000000000000' }}
+  TF_LOCK_TABLE: ecp-terraform-locks
+  AWS_SERVERLESS_ROLE_ARN: ${{ vars.AWS_SERVERLESS_ROLE_ARN || 'arn:aws:iam::000000000000:role/ecp-gha-serverless' }}
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "0"
+
+jobs:
+  validate:
+    name: Validate application
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Compile backend
+        working-directory: application/backend
+        run: python -m compileall -q app lambda_handler.py
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Typecheck and build frontend
+        working-directory: application/frontend
+        run: |
+          npm install --no-audit --no-fund
+          npx tsc --noEmit
+
+  provision:
+    name: Terraform apply
+    needs: validate
+    runs-on: ubuntu-latest
+    environment: serverless-dev
+    outputs:
+      api_url: ${{ steps.tf.outputs.api_url }}
+      site_url: ${{ steps.tf.outputs.site_url }}
+      bucket: ${{ steps.tf.outputs.bucket }}
+      distribution_id: ${{ steps.tf.outputs.distribution_id }}
+    defaults:
+      run:
+        working-directory: infrastructure/serverless
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_SERVERLESS_ROLE_ARN }}
+          role-session-name: gha-serverless-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build Lambda package
+        working-directory: application/backend
+        run: |
+          set -euo pipefail
+          mkdir -p ../../dist/lambda
+          python -m pip install --quiet --target ../../dist/lambda -r requirements-lambda.txt
+          cp -r app ../../dist/lambda/
+          cp lambda_handler.py ../../dist/lambda/
+          cd ../../dist/lambda
+          zip -qr ../lambda.zip . -x "*.pyc" -x "*/__pycache__/*"
+          ls -lh ../lambda.zip
+
+      - name: Terraform init
+        run: |
+          terraform init -input=false \
+            -backend-config="bucket=${TF_STATE_BUCKET}" \
+            -backend-config="dynamodb_table=${TF_LOCK_TABLE}"
+
+      - name: Terraform fmt
+        run: terraform fmt -check -recursive
+
+      - name: Terraform validate
+        run: terraform validate
+
+      - name: Terraform plan
+        run: terraform plan -input=false -out=tfplan -var="app_version=${GITHUB_SHA::8}"
+
+      - name: Terraform apply
+        run: terraform apply -input=false -auto-approve tfplan
+
+      - name: Collect outputs
+        id: tf
+        run: |
+          {
+            echo "api_url=$(terraform output -raw api_base_url)"
+            echo "site_url=$(terraform output -raw site_url)"
+            echo "bucket=$(terraform output -raw frontend_bucket)"
+            echo "distribution_id=$(terraform output -raw cloudfront_distribution_id)"
+          } >> "$GITHUB_OUTPUT"
+
+  ship:
+    name: Ship frontend and verify
+    needs: provision
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_SERVERLESS_ROLE_ARN }}
+          role-session-name: gha-ship-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Build frontend against the deployed API
+        working-directory: application/frontend
+        env:
+          VITE_API_BASE_URL: ${{ needs.provision.outputs.api_url }}
+        run: |
+          npm install --no-audit --no-fund
+          npm run build
+          ls -lh dist
+
+      - name: Upload to S3
+        env:
+          BUCKET: ${{ needs.provision.outputs.bucket }}
+        working-directory: application/frontend
+        run: |
+          aws s3 sync dist/ "s3://${BUCKET}/" --delete \
+            --exclude "index.html" \
+            --cache-control "public,max-age=31536000,immutable"
+          aws s3 cp dist/index.html "s3://${BUCKET}/index.html" \
+            --cache-control "no-cache,no-store,must-revalidate"
+
+      - name: Invalidate CloudFront
+        env:
+          DISTRIBUTION_ID: ${{ needs.provision.outputs.distribution_id }}
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id "${DISTRIBUTION_ID}" --paths "/*"
+
+      - name: Smoke test API
+        env:
+          API: ${{ needs.provision.outputs.api_url }}
+        run: |
+          set -euo pipefail
+          echo "health:"
+          curl -fsS "${API}/api/health" | tee health.json
+          grep -q '"status":"ok"' health.json
+
+          echo "catalogue:"
+          curl -fsS "${API}/api/products" | tee products.json
+          PRODUCT_ID=$(jq -r '.items[0].id' products.json)
+          test -n "${PRODUCT_ID}" -a "${PRODUCT_ID}" != "null"
+
+          echo "create order:"
+          curl -fsS -X POST "${API}/api/orders" \
+            -H "Content-Type: application/json" \
+            -d "{\"customer_email\":\"test@example.com\",\"items\":[{\"product_id\":\"${PRODUCT_ID}\",\"quantity\":2}]}" \
+            | tee order.json
+          jq -e '.total_cents > 0' order.json
+
+          echo "orders list:"
+          curl -fsS "${API}/api/orders?limit=5" | jq -e '.count > 0'
+
+      - name: Smoke test site
+        env:
+          SITE: ${{ needs.provision.outputs.site_url }}
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3 4 5; do
+            code=$(curl -s -o site.html -w '%{http_code}' "${SITE}")
+            echo "attempt ${attempt}: HTTP ${code}"
+            [ "${code}" = "200" ] && break
+            sleep 10
+          done
+          grep -q "Enterprise Cloud Platform" site.html
+
+      - name: Deployment summary
+        env:
+          SITE: ${{ needs.provision.outputs.site_url }}
+          API: ${{ needs.provision.outputs.api_url }}
+        run: |
+          {
+            echo "### Serverless deployment"
+            echo ""
+            echo "| Item | Value |"
+            echo "|---|---|"
+            echo "| Site | ${SITE} |"
+            echo "| API | ${API}/api/docs |"
+            echo "| Health | ${API}/api/health |"
+            echo "| Commit | \`${GITHUB_SHA::8}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
