@@ -62,7 +62,7 @@ class OrderItem(BaseModel):
 
 class Order(BaseModel):
     id: str
-    customer_email: EmailStr
+    customer_email: str  # masked before it leaves the service, so not EmailStr
     items: list[OrderItem]
     total_cents: int
     currency: str = "USD"
