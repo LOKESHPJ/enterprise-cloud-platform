@@ -32,7 +32,7 @@ jobs:
       - name: Check repository configuration
         run: |
           missing=0
-          for v in AWS_SERVERLESS_ROLE_ARN AWS_TERRAFORM_ROLE_ARN TF_STATE_BUCKET; do
+          for v in AWS_TERRAFORM_ROLE_ARN; do
             if [ -z "${!v}" ]; then
               echo "::error::$v repository variable is not set. See README Quick start, step 3."
               missing=1
