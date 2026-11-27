@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, Response, status
 
 from app.schemas import Product, ProductCreate, ProductPage, ProductUpdate
 from app.storage import get_repository
@@ -37,7 +37,18 @@ def update_product(product_id: str, payload: ProductUpdate) -> Product:
     return Product.model_validate(updated)
 
 
-@router.delete("/{product_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_product(product_id: str) -> None:
+@router.delete(
+    "/{product_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+)
+def delete_product(product_id: str) -> Response:
+    """204 with an empty body.
+
+    The return type is Response rather than None: this module uses postponed
+    annotation evaluation, which would otherwise be resolved to NoneType and be
+    treated as a response model, and FastAPI forbids a body on 204.
+    """
     if not get_repository().delete_product(product_id):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "product not found")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
