@@ -48,18 +48,8 @@ output "lambda_function_name" {
 }
 
 output "lambda_alias" {
-  description = "Alias that API Gateway invokes and CodeDeploy shifts traffic on."
+  description = "Alias that API Gateway invokes and the pipeline shifts on release."
   value       = aws_lambda_alias.live.name
-}
-
-output "codedeploy_app" {
-  description = "CodeDeploy application for canary releases."
-  value       = aws_codedeploy_app.api.name
-}
-
-output "codedeploy_deployment_group" {
-  description = "Deployment group the pipeline targets."
-  value       = aws_codedeploy_deployment_group.api.deployment_group_name
 }
 
 output "budget_name" {

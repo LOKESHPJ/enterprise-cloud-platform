@@ -66,8 +66,6 @@ jobs:
       bucket: ${{ steps.tf.outputs.bucket }}
       distribution_id: ${{ steps.tf.outputs.distribution_id }}
       lambda_function: ${{ steps.tf.outputs.lambda_function }}
-      codedeploy_app: ${{ steps.tf.outputs.codedeploy_app }}
-      codedeploy_dg: ${{ steps.tf.outputs.codedeploy_dg }}
     defaults:
       run:
         working-directory: infrastructure/serverless
@@ -146,12 +144,10 @@ jobs:
             echo "bucket=$(terraform output -raw frontend_bucket)"
             echo "distribution_id=$(terraform output -raw cloudfront_distribution_id)"
             echo "lambda_function=$(terraform output -raw lambda_function_name)"
-            echo "codedeploy_app=$(terraform output -raw codedeploy_app)"
-            echo "codedeploy_dg=$(terraform output -raw codedeploy_deployment_group)"
           } >> "$GITHUB_OUTPUT"
 
   release:
-    name: Canary release (CodeDeploy)
+    name: Verified release (alias switch)
     needs: provision
     runs-on: ubuntu-latest
     steps:
@@ -161,11 +157,9 @@ jobs:
           role-session-name: gha-release-${{ github.run_id }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Shift traffic with CodeDeploy
+      - name: Point the live alias at the new immutable version
         env:
           FUNCTION: ${{ needs.provision.outputs.lambda_function }}
-          APP: ${{ needs.provision.outputs.codedeploy_app }}
-          DG: ${{ needs.provision.outputs.codedeploy_dg }}
         run: |
           set -euo pipefail
           CURRENT=$(aws lambda get-alias --function-name "$FUNCTION" --name live --query FunctionVersion --output text)
@@ -176,22 +170,15 @@ jobs:
             echo "Alias already serves the newest version; no release required."
             exit 0
           fi
-          APPSPEC=$(jq -n --arg f "$FUNCTION" --arg cv "${CURRENT}" --arg tv "${TARGET}" \
-            '{version:0.0,Resources:[{api:{Type:"AWS::Lambda::Function",Properties:{Name:$f,Alias:"live",CurrentVersion:$cv,TargetVersion:$tv}}}]}')
-          REVISION=$(jq -n --arg c "${APPSPEC}" '{revisionType:"AppSpecContent",appSpecContent:{content:$c}}')
-          DEPLOY=$(aws deploy create-deployment --application-name "${APP}" \
-            --deployment-group-name "${DG}" --revision "${REVISION}" --query deploymentId --output text)
-          echo "DEPLOYMENT_ID=${DEPLOY}" >> "$GITHUB_ENV"
-          echo "Canary 10% -> 100% over 5 minutes: ${DEPLOY}"
-          aws deploy wait deployment-successful --deployment-id "${DEPLOY}"
-          echo "Canary complete. 100% of traffic on version ${TARGET}."
+          aws lambda update-alias --function-name "$FUNCTION" --name live --function-version "${TARGET}"
+          echo "Alias moved to version ${TARGET}. Verification runs next; a failure moves it back to ${CURRENT}."
 
-      - name: Deployment outcome
-        if: always()
+      - name: Confirm alias position
+        env:
+          FUNCTION: ${{ needs.provision.outputs.lambda_function }}
         run: |
-          if [ -z "${DEPLOYMENT_ID:-}" ]; then exit 0; fi
-          aws deploy get-deployment --deployment-id "${DEPLOYMENT_ID}" \
-            --query 'deploymentInfo.{status:status,errorInformation:errorInformation}' || true
+          aws lambda get-alias --function-name "$FUNCTION" --name live \
+            --query '{alias:Name,version:FunctionVersion,arn:AliasArn}' --output table
 
   ship:
     name: Ship frontend and verify

@@ -23,8 +23,32 @@ env:
   TF_LOCK_TABLE: cloudforge-terraform-locks
 
 jobs:
+  preflight:
+    name: Are the enterprise images provisioned?
+    runs-on: ubuntu-latest
+    outputs:
+      exists: ${{ steps.check.outputs.exists }}
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_TERRAFORM_ROLE_ARN }}
+          role-session-name: gha-preflight-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Check ECR repositories
+        id: check
+        run: |
+          if aws ecr describe-repositories --repository-names cloudforge-dev-api >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::ECR repositories do not exist yet - the enterprise track has not been applied. Skipping image build."
+          fi
+
   build:
     name: Build ${{ matrix.component }}
+    needs: preflight
+    if: needs.preflight.outputs.exists == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false

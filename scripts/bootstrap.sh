@@ -232,7 +232,8 @@ cat > "${SERVERLESS_POLICY}" <<JSON
     {
       "Sid": "BudgetGuardrail",
       "Effect": "Allow",
-      "Action": ["budgets:ModifyBudget", "budgets:ViewBudget"],
+      "Action": ["budgets:ModifyBudget", "budgets:ViewBudget", "budgets:TagResource",
+                 "budgets:UntagResource", "budgets:ListTagsForResource"],
       "Resource": "arn:aws:budgets::${ACCOUNT}:budget/*"
     },
     {
