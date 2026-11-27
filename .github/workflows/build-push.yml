@@ -18,8 +18,8 @@ permissions:
 
 env:
   AWS_REGION: us-east-1
-  AWS_TERRAFORM_ROLE_ARN: ${{ vars.AWS_TERRAFORM_ROLE_ARN || 'arn:aws:iam::000000000000:role/cloudforge-gha-terraform' }}
-  TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET || 'cloudforge-tfstate-000000000000' }}
+  AWS_TERRAFORM_ROLE_ARN: ${{ vars.AWS_TERRAFORM_ROLE_ARN }}
+  TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
   TF_LOCK_TABLE: cloudforge-terraform-locks
 
 jobs:
@@ -29,6 +29,16 @@ jobs:
     outputs:
       exists: ${{ steps.check.outputs.exists }}
     steps:
+      - name: Check repository configuration
+        run: |
+          missing=0
+          for v in AWS_SERVERLESS_ROLE_ARN AWS_TERRAFORM_ROLE_ARN TF_STATE_BUCKET; do
+            if [ -z "${!v}" ]; then
+              echo "::error::$v repository variable is not set. See README Quick start, step 3."
+              missing=1
+            fi
+          done
+          exit $missing
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ env.AWS_TERRAFORM_ROLE_ARN }}
