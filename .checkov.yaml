@@ -114,3 +114,17 @@ skip-check:
   # Event notifications and object lifecycle on a regenerable static bundle.
   - CKV2_AWS_62
   - CKV2_AWS_61
+  # CloudFront access logging, CloudFront WAF, and a custom ACM certificate all
+  # need extra billable or domain-bound resources. The default *.cloudfront.net
+  # certificate is used, and the distribution has no geo restriction by design
+  # (it is a public storefront API).
+  - CKV_AWS_86
+  - CKV_AWS_68
+  - CKV_AWS_374
+  - CKV2_AWS_42
+  # HTTP->HTTPS redirect on the ALB is impossible without an ACM certificate;
+  # `certificate_arn` enables the HTTPS listener when one is supplied.
+  - CKV2_AWS_20
+  # Performance Insights is enabled with the free seven-day retention; a
+  # customer managed KMS key would add ~$1/month.
+  - CKV_AWS_354

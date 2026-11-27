@@ -29,6 +29,13 @@ variable "tags" {
 
 data "aws_availability_zones" "available" {
   state = "available"
+
+  # Pin the result set: without the opt-in filter the list can silently grow
+  # when an account gains access to additional zones.
+  filter {
+    name   = "opt-in-status"
+    values = ["opt-in-not-required"]
+  }
 }
 
 locals {
