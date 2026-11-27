@@ -280,7 +280,8 @@ in [`docs/RUNBOOK.md`](docs/RUNBOOK.md).
 | Network | Buckets private with public access blocked, RDS unreachable from the internet, default VPC security group stripped of every rule |
 | Data in transit | `rds.force_ssl=1`, TLS 1.2 or newer on the CDN when enabled, HSTS and the usual browser headers |
 | Secrets | Database password generated and stored in Secrets Manager, task definitions reference keys rather than values |
-| Abuse limits | API Gateway throttles at 100 requests per second with a burst of 200 |
+| Privacy | Customer addresses are masked in every response. The catalogue is read-only over HTTP, so no visitor can deface or empty it |
+| Abuse limits | API Gateway throttles at 100 requests per second with a burst of 200, and stored orders stop at 500 |
 
 Gaps that were accepted on purpose are listed with reasons in [`.checkov.yaml`](.checkov.yaml)
 and in [Known limitations](#known-limitations).
@@ -303,7 +304,9 @@ Prices and the levers that change them are in [`docs/COSTS.md`](docs/COSTS.md).
 
 These are scope decisions rather than surprises waiting to happen.
 
-- There is no authentication on the API. Anyone with the URL can create an order. It is a
+- There is no authentication on the API. Anyone with the URL can create an order. The service
+  masks addresses in every response, refuses all catalogue writes and stops accepting orders
+  after 500 rows, but a determined visitor can still add junk orders until that cap. It is a
   catalogue demo, not a payment system, and Cognito is the obvious next step.
 - There is no WAF and no rate limiting beyond the API Gateway throttle. WAF costs around
   $5 per month per ACL.
