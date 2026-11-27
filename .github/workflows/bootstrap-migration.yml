@@ -51,7 +51,17 @@ jobs:
           set -uo pipefail
           BUCKET=ecp-tfstate-000000000000
           if aws s3api head-bucket --bucket "${BUCKET}" 2>/dev/null; then
-            aws s3 rm "s3://${BUCKET}" --recursive --quiet
+            # The bucket is versioned, so every version and delete marker has to
+            # go before the bucket itself can be removed.
+            while :; do
+              PAYLOAD=$(aws s3api list-object-versions --bucket "${BUCKET}" --max-keys 500 \
+                --query '{"Objects": (Versions || `[]`) + (DeleteMarkers || `[]`)}' --output json 2>/dev/null || echo '{"Objects":[]}')
+              COUNT=$(echo "${PAYLOAD}" | jq '.Objects | length')
+              [ "${COUNT:-0}" -eq 0 ] && break
+              echo "${PAYLOAD}" | jq '{Objects: [.Objects[] | {Key: .Key, VersionId: .VersionId}]}' > /tmp/purge.json
+              aws s3api delete-objects --bucket "${BUCKET}" --delete file:///tmp/purge.json >/dev/null
+              echo "purged ${COUNT} versions"
+            done
             aws s3api delete-bucket --bucket "${BUCKET}"
             echo "deleted s3://${BUCKET}"
           else
