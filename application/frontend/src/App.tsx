@@ -113,8 +113,8 @@ export default function App() {
         <div className="brand">
           <span className="mark" aria-hidden="true" />
           <div>
-            <h1>Enterprise Cloud Platform</h1>
-            <p className="subtitle">Catalogue &amp; order service</p>
+            <h1>CloudForge</h1>
+            <p className="subtitle">Enterprise Cloud Platform · catalogue &amp; order service</p>
           </div>
         </div>
 

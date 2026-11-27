@@ -50,6 +50,21 @@ required reviewers, the job pauses there.
 
 ## Roll back a bad deployment
 
+**Serverless (live track):** the pipeline does it for you. If any smoke test fails
+after the alias moves, the `Roll back alias after failed verification` step points the
+`live` alias back at the previous version. To do it by hand:
+
+```bash
+FUNCTION=cloudforge-dev-api
+VERSIONS=$(aws lambda list-versions-by-function --function-name "$FUNCTION" \
+  --query 'Versions[].Version' --output text | tr '\t' '\n' | sort -n)
+CURRENT=$(aws lambda get-alias --function-name "$FUNCTION" --name live --query FunctionVersion --output text)
+PREVIOUS=$(echo "$VERSIONS" | awk -v c="$CURRENT" '$1 < c' | tail -1)
+aws lambda update-alias --function-name "$FUNCTION" --name live --function-version "$PREVIOUS"
+```
+
+No rebuild, no Terraform, seconds to complete.
+
 **ECS (enterprise):** the circuit breaker already did it if health checks failed. If it
 did not, redeploy the previous image tag:
 

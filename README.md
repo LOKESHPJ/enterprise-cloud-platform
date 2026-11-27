@@ -153,8 +153,15 @@ Terraform refuses to plan the enterprise track unless `confirm_spend=true`, so a
 
 - **Two-phase ECS deploy** — the image cannot exist before ECR exists, so services are
   gated behind `enable_services` instead of shipping tasks that crash on first boot.
-- **Automatic rollback** — ECS deployment circuit breaker with `rollback = true` on both
-  services; a failed health check returns traffic to the previous task definition.
+- **Rollback that actually runs** — the live track publishes an immutable Lambda version and
+  moves the `live` alias; failing smoke tests revert the alias automatically. The enterprise
+  track uses the ECS circuit breaker (`rollback = true`) for the same effect.
+- **Security gates in CI** — Trivy (dependency CVEs and committed secrets), Checkov
+  (192 Terraform checks, 0 failures, exceptions documented in `.checkov.yaml`), Gitleaks
+  over full history, and a container CVE scan *before* any image reaches ECR.
+- **Cost governance** — an AWS Budget with 50/80/100% thresholds, `Project`/`Environment`/
+  `CostCenter`/`Owner` tags on every resource, 7-day log retention, ECR lifecycle policy,
+  and a hard `confirm_spend` gate on the billable track.
 - **Cost mode vs production mode** — `enable_nat_gateway=false` runs tasks in public
   subnets with public IPs (security groups still restrict ingress to the ALB only).
   Setting it to `true` moves tasks to private subnets behind NAT for ~$32/month more.

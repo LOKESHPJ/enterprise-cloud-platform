@@ -100,6 +100,27 @@ the image exists produces a deployment loop of failing tasks. Instead:
 The same flag makes teardown safe: `destroy` runs with `enable_services=false` so
 services are removed before the images and cluster disappear.
 
+## Release model
+
+Every deploy publishes an immutable Lambda version and moves the `live` alias.
+
+```
+terraform apply  -> new version N+1 published, alias untouched
+release job      -> alias live: N -> N+1
+ship job         -> builds the SPA, seeds data, runs API and site smoke tests
+                 -> on any failure: alias moves back to N automatically
+```
+
+Terraform owns the function and its versions; the pipeline owns the alias
+position (`lifecycle { ignore_changes = [function_version] }`). That split is
+what makes a rollback a single atomic alias update rather than a redeploy.
+
+AWS CodeDeploy would provide a 10%/5-minute canary with alarm-driven rollback,
+but it is unavailable on this account until AWS completes verification
+(`SubscriptionRequiredException`). The pipeline implements the same guarantee
+with a verify-then-revert step, and `release.tf` documents where CodeDeploy
+would slot in.
+
 ## Data model
 
 Single table design (DynamoDB) and relational equivalent (PostgreSQL):
