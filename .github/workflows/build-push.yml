@@ -99,14 +99,15 @@ jobs:
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
 
       # Nothing reaches the registry unless it passes the CVE gate first.
-      - name: Scan image for vulnerabilities
-        uses: aquasecurity/trivy-action@0.28.0
-        with:
-          image-ref: ${{ steps.ecr.outputs.repo }}:sha-${{ github.sha }}
-          severity: "CRITICAL,HIGH"
-          ignore-unfixed: "true"
-          exit-code: "1"
-          format: "table"
+      - name: Install Trivy and scan the image
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+            | sudo sh -s -- -b /usr/local/bin
+          trivy image \
+            --severity CRITICAL,HIGH \
+            --ignore-unfixed \
+            --exit-code 1 \
+            "${{ steps.ecr.outputs.repo }}:sha-${{ github.sha }}"
 
       - name: Push vetted image
         run: |

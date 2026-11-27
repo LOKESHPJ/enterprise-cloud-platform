@@ -97,3 +97,20 @@ skip-check:
   - CKV_AWS_259
   # Internet-facing port 80 on the ALB is the intended public entry point.
   - CKV_AWS_260
+  # ALB speaks HTTP on port 80 because HTTPS needs an ACM certificate and a
+  # domain; `certificate_arn` enables a TLS listener when one exists.
+  - CKV_AWS_378
+  # WAF on the ALB and CloudFront - $5+/month per ACL, out of scope for a
+  # zero-cost reference platform. Noted as a production gap in the README.
+  - CKV2_AWS_28
+  - CKV2_AWS_47
+  # VPC flow logs and Secrets Manager rotation both require additional
+  # infrastructure (log bucket, rotation Lambda) that bills monthly.
+  - CKV2_AWS_11
+  - CKV2_AWS_57
+  # Security groups are attached by ID from the compute/rds modules, which this
+  # static analysis cannot follow across module boundaries.
+  - CKV2_AWS_5
+  # Event notifications and object lifecycle on a regenerable static bundle.
+  - CKV2_AWS_62
+  - CKV2_AWS_61

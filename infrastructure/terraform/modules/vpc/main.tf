@@ -143,6 +143,14 @@ resource "aws_route_table_association" "private" {
 # --------------------------------------------------------- security groups
 # The three tiers are created here, together, so that the module graph has no
 # cycles: ALB -> app -> database.
+#
+# The VPC's default security group is stripped of all rules: anything created
+# later that forgets to name a group inherits isolation, not permissiveness.
+resource "aws_default_security_group" "default" {
+  vpc_id = aws_vpc.this.id
+
+  tags = merge(var.tags, { Name = "${var.name_prefix}-default-sg-restricted" })
+}
 resource "aws_security_group" "alb" {
   name        = "${var.name_prefix}-alb"
   description = "Public ingress to the application load balancer"

@@ -33,6 +33,23 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "web" {
   }
 }
 
+# Bundles are rebuilt on every deploy. Abort incomplete multipart uploads so
+# failed runs cannot accumulate storage charges.
+resource "aws_s3_bucket_lifecycle_configuration" "web" {
+  bucket = aws_s3_bucket.web.id
+
+  rule {
+    id     = "abort-incomplete-multipart"
+    status = "Enabled"
+
+    filter {}
+
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 1
+    }
+  }
+}
+
 # ---------------------------------------------------------------------------
 # CloudFront mode (default): bucket stays private, CloudFront reads via OAC.
 # ---------------------------------------------------------------------------
