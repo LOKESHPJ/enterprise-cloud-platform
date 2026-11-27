@@ -24,8 +24,9 @@
 Request path (default mode):
 
 ```
-Browser → API Gateway → Lambda ──┬── /api/* → FastAPI routers → DynamoDB
-                                 └── /*     → static/index.html + /assets
+Browser -> API Gateway -> Lambda
+                            |- /api/*  -> FastAPI routers -> DynamoDB
+                            '- /*      -> static/index.html + /assets
 ```
 
 Two hosting modes exist because CloudFront is unavailable until AWS verifies a new
@@ -54,9 +55,9 @@ account:
 Request path:
 
 ```
-Browser → ALB :80
-            ├── /api/*  → ECS API task (FastAPI + SQLAlchemy → RDS)
-            └── /*      → ECS web task (nginx → React bundle)
+Browser -> ALB :80
+             |- /api/*  -> ECS API task (FastAPI + SQLAlchemy -> RDS)
+             '- /*      -> ECS web task (nginx -> React bundle)
 ```
 
 ## Security controls
