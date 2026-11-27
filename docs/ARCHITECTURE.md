@@ -13,7 +13,7 @@
 
 | Layer | Service | Notes |
 |---|---|---|
-| Edge / SPA hosting | API Gateway (`$default` route) → Lambda | One HTTPS origin for UI and API; no CORS |
+| Edge / SPA hosting | API Gateway, `$default` route | One HTTPS origin for UI and API, so no CORS |
 | Optional CDN | CloudFront + private S3 (OAC) | `enable_cloudfront=true`; blocked on unverified accounts |
 | API | API Gateway HTTP API | `GET /`, `ANY /api/{proxy+}`, `$default`, 100 rps throttle |
 | Compute | Lambda (python3.12, 512 MB) | FastAPI through Mangum, 25 s timeout, serves the SPA bundle from `static/` |
@@ -44,8 +44,8 @@ account:
 | Network | VPC `10.20.0.0/16` | 2 AZs, 2 public + 2 private subnets, IGW |
 | Egress | NAT gateway (optional) | Off in cost mode; tasks run public with restricted SGs |
 | Edge | ALB | HTTP :80, optional HTTPS :443 with ACM |
-| Routing | Listener rules | `/api/*` → API target group, `*` → web target group |
-| Compute | ECS Fargate | API 0.25 vCPU/512 MB ×2, web ×1, circuit breaker rollback |
+| Routing | Listener rules | `/api/*` goes to the API target group, everything else to the web target group |
+| Compute | ECS Fargate | API 0.25 vCPU and 512 MB, two tasks. Web one task. Circuit breaker rollback |
 | Registry | ECR | Immutable tags, scan on push, lifecycle policy |
 | Data | RDS PostgreSQL 16.4 | `db.t4g.micro`, gp3 20 GB, single-AZ, TLS enforced |
 | Secrets | Secrets Manager | Generated 32 char password, read only by the execution role |
@@ -84,7 +84,7 @@ Browser → ALB :80
 | API returns 5xx | `api-5xx` alarm fires, dashboard shows the target group error rate |
 | Database unreachable | `/api/health` returns 503, ALB marks targets unhealthy after 3 failed checks |
 | Database slow | p95 latency alarm at 2 s for 10 minutes; RDS CPU alarm at 80% |
-| Traffic spike | Target tracking at 60% CPU scales API 2 → 6 tasks, 60 s scale-out cooldown |
+| Traffic spike | Target tracking at 60% CPU scales the API from 2 to 6 tasks, with a 60 s scale-out cooldown |
 | Image tag missing | Task fails to pull; circuit breaker stops the deployment instead of taking down the service |
 | Log volume grows | Retention is enforced at 7 days by Terraform, so log groups cannot grow unbounded |
 
@@ -93,9 +93,10 @@ Browser → ALB :80
 ECS services reference an image that Terraform cannot build. Applying services before
 the image exists produces a deployment loop of failing tasks. Instead:
 
-1. `enable_services=false` → VPC, ALB, RDS, ECR, secret, alarms. ALB has empty target groups.
-2. `build-push.yml` → images tagged `sha-<commit>` land in ECR.
-3. `enable_services=true` + `image_tag` → services start and health checks pass.
+1. `enable_services=false`: creates VPC, ALB, RDS, ECR, secret and alarms. The ALB has empty
+   target groups.
+2. `build-push.yml`: images tagged `sha-<commit>` land in ECR.
+3. `enable_services=true` with `image_tag`: services start and health checks pass.
 
 The same flag makes teardown safe: `destroy` runs with `enable_services=false` so
 services are removed before the images and cluster disappear.

@@ -14,7 +14,7 @@ Verify against the AWS pricing calculator before trusting them for a budget.
 | CloudFront | 1 TB transfer, 10M requests | negligible | $0.00 |
 | CloudWatch Logs | 5 GB ingest | < 100 MB | $0.00 |
 | CloudWatch alarms | 10 alarms | 2 | $0.00 |
-| IAM / OIDC / STS | free | — | $0.00 |
+| IAM / OIDC / STS | free | not billable | $0.00 |
 | **Total** | | | **$0.00** |
 
 Caveats:
@@ -37,7 +37,7 @@ Caveats:
 | Secrets Manager | 1 secret | $0.40 |
 | ECR | ~1 GB images | $0.10 |
 | CloudWatch | 6 alarms, 3 log groups, 1 dashboard | $0.50 - $1.00 |
-| **Total** | | **≈ $43 - $52** |
+| **Total** | | **about $43 to $52** |
 
 ### Production mode (`enable_nat_gateway = true`, Multi-AZ, more tasks)
 
@@ -46,7 +46,7 @@ Caveats:
 | 2 NAT gateways | +$32.00 |
 | RDS Multi-AZ | +$12.00 - $15.00 |
 | API 4 tasks | +$6.00 |
-| **Total** | **≈ $93 - $105** |
+| **Total** | **about $93 to $105** |
 
 ### Per-hour intuition
 
@@ -60,16 +60,17 @@ for a week ($10) or forgetting NAT and Multi-AZ are on.
 
 ## Cost controls built into this repo
 
-1. `confirm_spend` variable — Terraform refuses to plan the enterprise track unless it is
-   `true`. The workflow additionally requires typing `DEPLOY-BILLABLE`.
-2. `enable_services` — the first apply creates no running compute.
-3. NAT gateway default off — saves $32/month and is called out in the README.
-4. CloudWatch retention 7 days, Container Insights disabled, Performance Insights off,
-   PITR off on DynamoDB, no DynamoDB Provisioned capacity.
-5. ECR lifecycle policy — 10 tagged images max, untagged expire in 7 days.
-6. `skip_final_snapshot = true` and no deletion protection in cost mode, so teardown does
-   not fail or leave paid snapshots behind.
-7. Destroy workflows for both tracks.
+1. `confirm_spend` stops Terraform from even planning the enterprise track until it is set to
+   `true`, and the workflow also makes you type `DEPLOY-BILLABLE`.
+2. `enable_services` keeps the first apply from creating any running compute.
+3. NAT gateways are off by default, which saves about $32 per month.
+4. Log retention is capped at seven days. Container Insights and DynamoDB point in time
+   recovery stay off, and Performance Insights runs with its free seven day retention.
+5. The ECR lifecycle policy keeps the ten most recent tagged images and expires untagged ones
+   after a week.
+6. `skip_final_snapshot` is on and deletion protection is off in cost mode, so teardown
+   finishes cleanly and leaves no paid snapshots behind.
+7. Both tracks have a destroy workflow.
 
 ## Budget guardrail (provisioned by Terraform)
 

@@ -114,16 +114,16 @@ export default function App() {
           <span className="mark" aria-hidden="true" />
           <div>
             <h1>CloudForge</h1>
-            <p className="subtitle">Enterprise Cloud Platform · catalogue &amp; order service</p>
+            <p className="subtitle">Enterprise Cloud Platform, catalogue and order service</p>
           </div>
         </div>
 
         <div className="status" title="Live response from /api/health">
           <span className={`dot ${health?.storage_healthy ? "ok" : "warn"}`} />
           <span>
-            {health ? `${health.storage_backend} · ${health.environment}` : "connecting"}
+            {health ? `${health.storage_backend}, ${health.environment}` : "connecting"}
           </span>
-          <span className="version">v{health?.version ?? "—"}</span>
+          <span className="version">v{health?.version ?? "n/a"}</span>
         </div>
       </header>
 
@@ -165,7 +165,7 @@ export default function App() {
             </div>
 
             {loading ? (
-              <p className="muted">Loading catalogue…</p>
+              <p className="muted">Loading catalogue...</p>
             ) : (
               <ul className="grid">
                 {products.map((product) => (
@@ -245,7 +245,7 @@ export default function App() {
               disabled={!cart.length || submitting}
               onClick={() => void submitOrder()}
             >
-              {submitting ? "Placing order…" : "Place order"}
+              {submitting ? "Placing order..." : "Place order"}
             </button>
           </aside>
         </main>
