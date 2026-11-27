@@ -21,6 +21,48 @@ from app.storage.base import Repository
 INDEX_NAME = "gsi1"
 INTERNAL_KEYS = {"pk", "sk", "gsi1pk", "gsi1sk"}
 
+# The catalogue is platform-owned reference data, not visitor-writable content.
+# Deterministic ids make seeding idempotent: a conditional put means a second
+# cold start cannot duplicate a product.
+SEED_PRODUCTS: list[dict[str, Any]] = [
+    {
+        "id": "seed-aurora-desk-lamp",
+        "name": "Aurora Desk Lamp",
+        "description": "Warm dimmable LED lamp with a machined aluminium base.",
+        "price_cents": 8900,
+        "currency": "USD",
+        "category": "lighting",
+        "stock": 42,
+    },
+    {
+        "id": "seed-orbit-headphones",
+        "name": "Orbit Wireless Headphones",
+        "description": "Over-ear ANC headphones, 40 hour battery.",
+        "price_cents": 24900,
+        "currency": "USD",
+        "category": "audio",
+        "stock": 18,
+    },
+    {
+        "id": "seed-slate-keyboard",
+        "name": "Slate Mechanical Keyboard",
+        "description": "75 percent layout, hot-swap switches, PBT caps.",
+        "price_cents": 13500,
+        "currency": "USD",
+        "category": "peripherals",
+        "stock": 27,
+    },
+    {
+        "id": "seed-nimbus-mat",
+        "name": "Nimbus Standing Mat",
+        "description": "Anti-fatigue mat for standing desks.",
+        "price_cents": 6900,
+        "currency": "USD",
+        "category": "furniture",
+        "stock": 60,
+    },
+]
+
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
@@ -51,6 +93,30 @@ class DynamoRepository(Repository):
     def __init__(self, table_name: str | None = None) -> None:
         self.table_name = table_name or settings.table_name
         self._table = boto3.resource("dynamodb").Table(self.table_name)
+        self._seeded = False
+
+    # ---------------------------------------------------------------- seeding
+    def _ensure_seeded(self) -> None:
+        if self._seeded:
+            return
+        self._seeded = True
+        for product in SEED_PRODUCTS:
+            item = {
+                **product,
+                "created_at": "2026-01-01T00:00:00Z",
+                "updated_at": "2026-01-01T00:00:00Z",
+                "pk": f"PRODUCT#{product['id']}",
+                "sk": "METADATA",
+                "gsi1pk": "TYPE#PRODUCT",
+                "gsi1sk": f"2026-01-01T00:00:00Z#{product['id']}",
+            }
+            try:
+                self._table.put_item(
+                    Item=item, ConditionExpression="attribute_not_exists(pk)"
+                )
+            except ClientError as exc:
+                if exc.response["Error"]["Code"] != "ConditionalCheckFailedException":
+                    raise
 
     # ---------------------------------------------------------------- health
     def health(self) -> bool:
@@ -62,6 +128,7 @@ class DynamoRepository(Repository):
 
     # -------------------------------------------------------------- products
     def list_products(self, limit: int = 50) -> list[dict[str, Any]]:
+        self._ensure_seeded()
         response = self._table.query(
             IndexName=INDEX_NAME,
             KeyConditionExpression=Key("gsi1pk").eq("TYPE#PRODUCT"),
@@ -71,6 +138,7 @@ class DynamoRepository(Repository):
         return [_public(item) for item in response.get("Items", [])]
 
     def get_product(self, product_id: str) -> dict[str, Any] | None:
+        self._ensure_seeded()
         response = self._table.get_item(
             Key={"pk": f"PRODUCT#{product_id}", "sk": "METADATA"}
         )

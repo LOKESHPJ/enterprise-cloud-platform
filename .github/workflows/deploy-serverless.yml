@@ -225,24 +225,6 @@ jobs:
           aws cloudfront create-invalidation \
             --distribution-id "${DISTRIBUTION_ID}" --paths "/*"
 
-      - name: Seed catalogue (idempotent)
-        env:
-          API: ${{ needs.provision.outputs.api_url }}
-        run: |
-          set -euo pipefail
-          COUNT=$(curl -fsS "${API}/api/products" | jq -r '.count')
-          echo "existing products: ${COUNT}"
-          if [ "${COUNT}" != "0" ]; then
-            echo "catalogue already seeded"
-            exit 0
-          fi
-          post() { curl -fsS -X POST "${API}/api/products" -H 'Content-Type: application/json' -d "$1" >/dev/null; }
-          post '{"name":"Aurora Desk Lamp","description":"Warm dimmable LED lamp with a machined aluminium base.","price_cents":8900,"category":"lighting","stock":42}'
-          post '{"name":"Orbit Wireless Headphones","description":"Over-ear ANC headphones, 40 hour battery.","price_cents":24900,"category":"audio","stock":18}'
-          post '{"name":"Slate Mechanical Keyboard","description":"75 percent layout, hot-swap switches, PBT caps.","price_cents":13500,"category":"peripherals","stock":27}'
-          post '{"name":"Nimbus Standing Mat","description":"Anti-fatigue mat for standing desks.","price_cents":6900,"category":"furniture","stock":60}'
-          curl -fsS "${API}/api/products" | jq -e '.count >= 4'
-
       - name: Smoke test API
         env:
           API: ${{ needs.provision.outputs.api_url }}
@@ -257,15 +239,24 @@ jobs:
           PRODUCT_ID=$(jq -r '.items[0].id' products.json)
           test -n "${PRODUCT_ID}" -a "${PRODUCT_ID}" != "null"
 
+          echo "catalogue is read-only from the internet:"
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "${API}/api/products" \
+            -H "Content-Type: application/json" -d '{"name":"x","price_cents":1}')
+          test "${code}" = "405" || test "${code}" = "404"
+
           echo "create order:"
           curl -fsS -X POST "${API}/api/orders" \
             -H "Content-Type: application/json" \
             -d "{\"customer_email\":\"test@example.com\",\"items\":[{\"product_id\":\"${PRODUCT_ID}\",\"quantity\":2}]}" \
             | tee order.json
           jq -e '.total_cents > 0' order.json
+          jq -e '.customer_email | test("\\\\*")' order.json
 
           echo "orders list:"
-          curl -fsS "${API}/api/orders?limit=5" | jq -e '.count > 0'
+          curl -fsS "${API}/api/orders?limit=5" | tee orders.json
+          jq -e '.count > 0' orders.json
+          echo "no unmasked addresses in the response:"
+          ! grep -qE '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}' orders.json
 
       - name: Smoke test site
         env:
